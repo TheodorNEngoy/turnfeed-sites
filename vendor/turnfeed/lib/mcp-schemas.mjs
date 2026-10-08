@@ -1,0 +1,689 @@
+import { z } from "zod";
+
+export const FEED_TIME_RANGE_FOLLOWUP_GUIDANCE = "For a new read about the same or that period, copy the previous result's exact timeRange.since and timeRange.until (omit any empty boundary), omit pastHours and cursor, and change only user-requested selectors; this also applies after empty results. For more pages of unchanged results, preserve the original input timeRange and selectors with the exact nextCursor.";
+
+// Tool input/output contracts only. Limits and policy labels come from the server;
+// this module does not read environment variables, stores, or authentication state.
+export function createToolSchemas({
+  DEFAULT_PEOPLE_LIMIT,
+  FEED_DIGEST_STRUCTURED_MAX_BYTES,
+  LIKE_ACTIONS,
+  MAX_AVATAR_URL_CHARS,
+  MAX_BIO_CHARS,
+  MAX_CLIENT_ID_CHARS,
+  MAX_CONTEXT_DIGEST_LIMIT,
+  MAX_CORRECTIONS_PER_TARGET,
+  MAX_CORRECTION_REASON_CHARS,
+  MAX_DISPLAY_NAME_CHARS,
+  MAX_FEED_QUERY_CHARS,
+  MAX_GROUP_DESC_CHARS,
+  MAX_GROUP_NAME_CHARS,
+  MAX_HANDLE_CHARS,
+  MAX_MEDIA_PER_POST,
+  MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS,
+  MAX_PEOPLE_QUERY_CHARS,
+  MAX_POST_CHARS,
+  MAX_REPLY_CHARS,
+  MAX_WEBSITE_URL_CHARS,
+  MIN_CORRECTION_REASON_CHARS,
+  MIN_HANDLE_CHARS,
+  NOTIFICATION_FILTERS,
+  NOTIFICATION_ORDERS,
+  PIN_ACTIONS,
+  REPORT_REASONS,
+  REPORT_REASON_OPTIONS,
+  THREAD_CONTEXT_REPLY_LIMIT,
+  TOOL_FEED_MEDIA_PREVIEW_LIMIT,
+  TOOL_QUOTE_MEDIA_PREVIEW_LIMIT,
+  TURNFEED_PUBLIC_REPLY_TO_POST_TOOL,
+  TURNFEED_PUBLIC_REPLY_TO_REPLY_TOOL,
+  TURNFEED_SELF_FOLLOW_MESSAGE,
+  TURNFEED_USER_CONTENT_BOUNDARY,
+  TURNFEED_USER_CONTENT_KIND,
+}) {
+const createPostMediaInputSchema = z.object({
+  url: z.string().trim().url().describe("Public HTTPS media URL to attach to the post."),
+  type: z.enum(["image", "video"]).optional().describe("Media kind for the attachment. Use image for photos or graphics, and video for video files."),
+});
+const createPostMediaDescription = "Optional public media attachments for the post. Send each attachment as an object with url and optional type; do not send bare strings. Supplied media will be attached to the public post.";
+const createPostInputSchema = z.object({
+  text: z.string().trim().min(1).max(MAX_POST_CHARS).describe(`Exact final public post text supplied by the user in the current turn, or an exact identifiable draft previously displayed in this conversation that the user explicitly selects for publication now. Preserve it verbatim and keep it within ${MAX_POST_CHARS} characters. For "Post this on Turnfeed: <text>", pass only <text>. Use this field only after the user explicitly requests publication of that exact version. Do not draft, rewrite, or invent text, publish from a drafting or revision request, choose between ambiguous draft versions, or use this field for an intent-only request without final post text.`),
+  visibility: z.enum(["public"]).describe("Required public-write acknowledgement. Use public because this creates a public Turnfeed post visible with the user's public profile name/handle."),
+  media: z.array(createPostMediaInputSchema).max(MAX_MEDIA_PER_POST).optional().describe(createPostMediaDescription),
+  quotePostId: z.string().trim().max(64).optional().describe("Optional internal id of a visible Turnfeed post the user explicitly asked to quote. Use only an id returned by Turnfeed context, and keep the quoted author/content visible in the surrounding request so the public action summary identifies the quoted source."),
+  clientId: z.string().trim().min(1).max(MAX_CLIENT_ID_CHARS).describe("Required stable client request id for retry-safe duplicate suppression. Use a fresh id for each new public write attempt; reuse the same clientId only when retrying the same exact public write request."),
+});
+const canonicalCreatePostInputSchema = createPostInputSchema.extend({
+  media: z.array(createPostMediaInputSchema.strict()).max(MAX_MEDIA_PER_POST).optional().describe(createPostMediaDescription),
+  quoteTargetLabel: z.string().trim().min(1).max(240).optional().describe("Required human-readable source label when quoting a post. Copy the visible author and post wording from current Turnfeed context; never use only an internal id."),
+  quoteAuthorName: z.string().trim().min(1).max(MAX_DISPLAY_NAME_CHARS).optional().describe("Required visible display name of the quoted-post author from current Turnfeed context so the public action summary identifies who is being quoted."),
+  quoteAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Visible public handle of the quoted-post author, without the leading @, when Turnfeed returned one."),
+  quotePostText: z.string().trim().min(1).max(700).optional().describe("Required visible text or excerpt of the current quoted post so the public action summary shows the source content, not only an internal id."),
+  quoteCreatedAt: z.string().trim().min(1).max(64).optional().describe("Required source-post timestamp from current Turnfeed thread context, used to bind the action to the exact current quoted post."),
+});
+const editPostInputSchema = z.object({
+  id: z.string().trim().min(1).max(64).optional().describe("Internal fallback post id. Human-readable target fields keep the action summary tied to the person and post instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable post target label for the action summary. Do not use a raw post id."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being edited so the action summary shows content, not only an internal id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+  text: z.string().trim().min(1).max(MAX_POST_CHARS).describe(`Updated public post text exactly as the user supplied it. Keep it within ${MAX_POST_CHARS} characters. Turnfeed validates the supplied text before saving.`),
+  correctionReason: z.string().trim().min(MIN_CORRECTION_REASON_CHARS).max(MAX_CORRECTION_REASON_CHARS).optional().describe("Backward-compatible optional public author edit note. Never ask the user for this and never invent it; omit it unless the user independently supplied an edit note in the same request. Turnfeed always preserves the prior text and timestamps in immutable read-only edit history.").meta({ deprecated: true }),
+});
+const canonicalEditPostInputSchema = editPostInputSchema.omit({ correctionReason: true });
+const setProfileInputSchema = z.object({
+  confirmationMode: z.enum(["preview", "save"]).optional().describe("Use preview first; preview never saves. Use save only after the user explicitly confirms the returned public profile preview in a separate message."),
+  confirmationId: z.string().trim().max(80).optional().describe("Required only with confirmationMode=save. Use the confirmationId returned by the preview call after the user confirms the public profile fields."),
+  displayName: z.string().trim().max(MAX_DISPLAY_NAME_CHARS).optional().describe("Optional public display name exactly as the user supplied it. This can be visible on the user's Turnfeed profile and beside public actions."),
+  handle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Optional public handle exactly as the user supplied it, without inventing a new identity. This can be visible on the user's Turnfeed profile and beside public actions."),
+  bio: z.string().trim().max(MAX_BIO_CHARS).optional().describe("Optional public bio exactly as the user supplied it. This can be visible on the user's Turnfeed profile."),
+  websiteUrl: z.string().trim().max(MAX_WEBSITE_URL_CHARS).optional().describe("Optional public HTTPS website URL exactly as the user supplied it. Local, private-network, and non-HTTPS URLs are not kept on the user's Turnfeed profile."),
+  avatarUrl: z.string().trim().max(MAX_AVATAR_URL_CHARS).optional().describe("Optional public HTTPS profile photo URL exactly as the user supplied it. Local, private-network, and non-HTTPS URLs are not kept on the user's Turnfeed profile."),
+  visibility: z.enum(["public"]).describe("Required public-profile acknowledgement. Use public because supplied profile fields can be visible to people using Turnfeed with the user's public actions."),
+});
+const canonicalSetProfileInputSchema = setProfileInputSchema.omit({
+  confirmationMode: true,
+  confirmationId: true,
+});
+const relationshipTargetRefInputSchema = z.string().trim()
+  .regex(/^tfr_[A-Za-z0-9_-]{24}$/)
+  .describe("Viewer-bound opaque target reference returned with an anonymous Turnfeed member. Use it instead of a handle; it cannot be used by another viewer.");
+const OPEN_SOCIAL_TARGET_KINDS = ["feed", "thread", "profile", "inbox"];
+const turnfeedRouterInputSchema = z.object({
+  targetKind: z.enum(OPEN_SOCIAL_TARGET_KINDS).optional().describe("Optional Turnfeed destination. Use feed for feed/search requests, thread for a specific post discussion, profile for a public profile, and inbox for notification activity."),
+  targetText: z.string().trim().max(MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS).optional().describe("The user's original Turnfeed request, passed through verbatim so the router can distinguish a plain feed read from a targeted search. Include this for natural-language requests such as 'Just show me the feed'."),
+  postId: z.string().trim().max(64).optional(),
+  profileHandle: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional(),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional(),
+  authorName: z.string().trim().max(MAX_PEOPLE_QUERY_CHARS).optional().describe("Public display name or Turnfeed member alias exactly as shown. For a request naming a member and a post beginning, use the full visible member label here."),
+  feedQuery: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional(),
+  postQuery: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional().describe("Visible beginning, title, or wording of the post to open. Use with targetKind=thread when the user identifies a post by its opening words."),
+  openInbox: z.boolean().optional(),
+  notificationsFilter: z.enum(NOTIFICATION_FILTERS).optional(),
+});
+const turnfeedPublicRouterInputSchema = z.object({
+  targetKind: z.enum(["feed", "thread", "profile"]).optional().describe("Optional public Turnfeed destination."),
+  targetText: z.string().trim().max(MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS).optional().describe("The user's original Turnfeed request, verbatim, for a public feed, thread, profile, or search; for example, 'Open Maya Chen’s post beginning “Launch notes”'."),
+  postId: z.string().trim().max(64).optional(),
+  profileHandle: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional(),
+  targetRef: relationshipTargetRefInputSchema.optional().describe("Viewer-bound target reference returned for an anonymous member; identifies that member with targetKind=profile when no public handle exists."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional(),
+  authorName: z.string().trim().max(MAX_PEOPLE_QUERY_CHARS).optional().describe("Public display name or full Turnfeed member alias exactly as shown; can be combined with postQuery for a post identified by its beginning."),
+  feedQuery: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional(),
+  postQuery: z.string().trim().max(MAX_FEED_QUERY_CHARS).optional().describe("Visible beginning, title, or wording of the post identified by targetKind=thread."),
+  limit: z.number().int().min(1).max(MAX_CONTEXT_DIGEST_LIMIT).optional().describe("Maximum number of matching posts or recent profile posts to return."),
+  cursor: z.string().trim().max(4096).optional().describe("Opaque continuation cursor from the previous matching-search, thread, or untargeted feed-fallback result. Valid with the exact returned value and the same original target, profile, author, topic, time range and focus selectors."),
+}).strict();
+const turnfeedStartInputSchema = z.object({
+  targetText: z.string().trim().max(MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS).optional().describe("The user's bare open/start/launch request, such as 'Open Turnfeed'. The tool returns the live default feed immediately."),
+}).strict();
+const feedTimeRangeInputSchema = z.object({
+  basis: z.enum(["created", "activity"]).optional().describe("created selects posts published during the interval (default); activity selects conversations with visible post/reply activity during it."),
+  pastHours: z.number().positive().max(8784).optional().describe(`Rolling lookback in hours, including fractional hours: 48 for the last 48 hours, 168 for seven days. Mutually exclusive with since and until. ${FEED_TIME_RANGE_FOLLOWUP_GUIDANCE}`),
+  since: z.string().max(64).optional().describe("Inclusive start as an ISO timestamp with Z or explicit UTC offset. Calendar dates require a known timezone to define an unambiguous boundary."),
+  until: z.string().max(64).optional().describe("Exclusive end as an ISO timestamp with Z or explicit UTC offset; defaults to the server's current time. An omitted since leaves the start unbounded. Mutually exclusive with pastHours."),
+}).strict();
+const turnfeedFeedRouterInputSchema = turnfeedPublicRouterInputSchema.extend({
+  profileScope: z.literal("self").optional().describe("self with targetKind=profile selects the signed-in user's Turnfeed name, username/handle, bio, website and follower/following counts. Identity is resolved only from verified Turnfeed sign-in, independently of ChatGPT memory or other accounts."),
+  authorScope: z.literal("self").optional().describe("self with targetKind=feed selects the signed-in user's own posts, including topic or date filters. The author is resolved from verified Turnfeed sign-in."),
+  timeRange: feedTimeRangeInputSchema.optional().describe("Publication-time or conversation-activity filter, independent of topic and author. Continuation requires the same filter and exact returned cursor."),
+  focus: z.enum(["active", "interesting", "needs_reply", "latest"]).optional().describe("Optional result order; latest orders posts chronologically, including within a requested time range."),
+  preparePostDeletion: z.literal("all_my_posts").optional().describe("Returns the signed-in user's post/reply deletion scope and snapshot-bound deleteArguments for a request to delete all their posts. The preview leaves stored posts unchanged. Deletion is a separate delete_post operation after a preview turn displays the exact scope and 'Delete these posts?' and a subsequent user message confirms that scope. The preview request and snapshot token do not represent that later confirmation. Mutually exclusive with author, profile, post, search and pagination selectors."),
+}).strict();
+const turnfeedInboxInputSchema = z.object({
+  targetText: z.string().trim().max(MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS).optional().describe("Optional raw inbox/account request. Examples: 'open my Turnfeed inbox', 'what needs my attention on Turnfeed', 'what should I respond to', 'any replies for me', 'has anyone written to me', 'show replies and mentions', 'who followed me', 'who do I follow', 'show accounts I blocked', or 'open likes in inbox'."),
+  notificationsFilter: z.enum(NOTIFICATION_FILTERS).optional().describe("Optional inbox filter. Use all for general attention prompts, replies for requests about who wrote, replied, mentioned the user, or what deserves a response, follows for follower activity, and likes for likes."),
+  notificationOrder: z.enum(NOTIFICATION_ORDERS).optional().describe("Use latest for explicit latest, newest, most recent, or chronological notification requests, including latest follows; this returns notification events newest first before applying limit. Use attention by default for ordinary inbox and attention requests: replies and mentions first. Explicit input takes precedence over targetText."),
+  relationshipKind: z.enum(["following", "blocked"]).optional().describe("Use following or blocked when the user asks to list their current relationships or needs a fresh targetRef to unfollow or unblock a handle-less member."),
+  relationshipQuery: z.string().trim().max(MAX_PEOPLE_QUERY_CHARS).optional().describe("Optional public display name, public handle, or Turnfeed member alias used to narrow the current following/blocked list."),
+  limit: z.number().int().min(1).max(DEFAULT_PEOPLE_LIMIT).optional().describe("Maximum notification events or current relationship rows to return."),
+  cursor: z.string().trim().max(4096).optional().describe("Opaque continuation cursor from the previous inbox page. Pass it back unchanged with the same notificationsFilter and notificationOrder, or with the same relationshipKind and relationshipQuery for relationship lists."),
+});
+const FEED_DIGEST_FOCUSES = ["active", "interesting", "needs_reply", "latest"];
+const FEED_ACTIVITY_WINDOWS = ["past_24_hours"];
+const feedDigestBaseInputSchema = z.object({
+  limit: z.number().int().min(1).max(MAX_CONTEXT_DIGEST_LIMIT).optional().describe("Maximum number of Turnfeed posts to return."),
+  focus: z.enum(FEED_DIGEST_FOCUSES).optional().describe("Feed focus. Use active by default for plain requests such as 'Just show me the feed', 'show the posts', 'catch me up on Turnfeed', 'what changed', or 'what's active'. Use interesting as the explicitly labeled form of the same relevance-ranked front page when the user asks for the most interesting posts, needs_reply for reply-worthy public threads, and latest only for explicit newest/latest/chronological requests. Do not use this for personal inbox prompts like 'what needs my attention', 'what should I respond to', or 'any replies for me'; use open_turnfeed_inbox instead."),
+  cursor: z.string().trim().max(4096).optional().describe("Opaque continuation cursor from the previous get_feed_digest result. When the user asks for more, pass back the exact nextCursor and preserve the same focus."),
+});
+const feedDigestInputSchema = feedDigestBaseInputSchema.extend({
+  targetText: z.string().trim().max(MAX_OPEN_SOCIAL_TARGET_TEXT_CHARS).optional().describe("Original natural-language Turnfeed read request. Prefer explicit structured filters when clear; do not turn an entire question into a search term."),
+  timeRange: feedTimeRangeInputSchema.optional().describe("General time filter: created for posts published during an interval, activity for conversations active during it. Use pastHours for rolling periods or since/until for calendar boundaries. Do not combine with activityWindow; keep the same filter and cursor on continuation."),
+  activityWindow: z.enum(FEED_ACTIVITY_WINDOWS).optional().describe("Compatibility rolling activity window for the last 24 hours. Prefer timeRange for publication dates, arbitrary periods or calendar days. Calendar boundaries require a timezone; today is not necessarily the last 24 hours."),
+  cursor: z.string().trim().max(4096).optional().describe("Opaque continuation cursor from the previous get_feed_digest result. When the user asks for more, pass back the exact nextCursor and preserve the same focus and activityWindow."),
+}).strict();
+const turnfeedProtocolInputSchema = z.object({});
+const threadContextInputSchema = z.object({
+  postId: z.string().trim().min(1).max(64).describe("Known Turnfeed post id for the thread to read before any public action."),
+  limit: z.number().int().min(1).max(THREAD_CONTEXT_REPLY_LIMIT).optional().describe("Maximum number of replies to return in this thread page."),
+  cursor: z.string().trim().max(4096).optional().describe("Opaque continuation cursor from the previous page of this same thread. Pass it back unchanged when the user asks for more replies."),
+});
+const replyPreflightInputSchema = z.object({
+  targetText: z.string().trim().min(1).max(700).describe("Required visible excerpt of the public Turnfeed post or reply being answered. Never use an internal id such as post-123 or reply-123."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Exact public reply text the user supplied. Keep it within ${MAX_REPLY_CHARS} characters. The reply and the user's public profile name/handle can be seen by people using Turnfeed. Do not rewrite it.`),
+  targetLabel: z.string().trim().max(240).optional().describe("Optional human-readable public reply target label, for example Richard's public Turnfeed post about Turnfeed or Maya Chen's public Turnfeed reply in Diego Alvarez's thread. Never use an internal id as this label."),
+  targetKind: z.enum(["post", "reply"]).optional().describe("Whether the visible target text is a top-level post or a reply. Use post unless the user is clearly replying to a specific reply."),
+  postText: z.string().trim().max(700).optional().describe("Visible text or excerpt of the post being replied to. Include this when available so the read-only diagnostic identifies content, not an internal id."),
+  replyText: z.string().trim().max(700).optional().describe("Visible text or excerpt of the reply being replied to. Include this when available so the read-only diagnostic identifies content, not an internal id."),
+  parentPostText: z.string().trim().max(700).optional().describe("Visible text or excerpt of the parent post when replying to a reply."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, when replying directly to a post."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, when replying to a reply."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post or reply timestamp from feed or thread context, used only to disambiguate matching targets."),
+});
+function reportReasonSchemaDescription(subject = "content") {
+  const cleanSubject = String(subject || "content").trim() || "content";
+  const options = REPORT_REASON_OPTIONS
+    .map((item) => `${item.id} (${item.label}: ${item.detail})`)
+    .join("; ");
+  return `Why this ${cleanSubject} should be reviewed. Use one of: ${options}`;
+}
+
+function reportReasonInputSchema(subject = "content") {
+  return z.enum(REPORT_REASONS).describe(reportReasonSchemaDescription(subject));
+}
+
+const likePostInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback post id. Human-readable target fields keep the action summary tied to the person and post instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable post target label for the action summary. Do not use a raw post id. The like or unlike is a Turnfeed social action that can be visible to people using Turnfeed."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being liked or unliked so the action summary shows content, not only an internal id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+  action: z.enum(LIKE_ACTIONS).optional().describe("Whether to like or unlike. Likes are Turnfeed social signals that can be visible in the app and notifications."),
+});
+const deletePostInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback post id. Human-readable target fields keep the action summary tied to the person and post instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable post target label for the action summary. Do not use a raw post id."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being deleted so the action summary shows content, not only an internal id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+});
+const candidateDeletePostInputSchema = deletePostInputSchema.extend({
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt for one-post deletion so the action summary shows content, not only an internal id. For all_my_posts, copy the exact human-readable scope text from the deletion summary so the action summary shows the post and reply counts."),
+  scope: z.enum(["one_post", "all_my_posts"]).optional().describe("Defaults to one_post. Use all_my_posts only after displaying the scope from open_turnfeed_feed preparePostDeletion=all_my_posts, ending that turn, and receiving a subsequent user message confirming that exact scope. Copy the preview's exact arguments into delete_post. The initial request or read permission is not confirmation. Never use reset_me for this request."),
+  deletionRef: z.string().trim().min(1).max(512).optional().describe("For all_my_posts only: copy the snapshot token from the read-only deletion summary. It binds the signed-in account and exact threads but does not authorize deletion. Only after a subsequent user message confirms the displayed scope, copy targetLabel and postText from that summary too. Never invent or reuse a token for a different request."),
+});
+const pinPostInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback post id. Human-readable target fields keep the action summary tied to the person and post instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable post target label for the action summary. Do not use a raw post id."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being pinned or unpinned so the action summary shows content, not only an internal id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+  action: z.enum(PIN_ACTIONS).optional(),
+});
+const replyToPostInputSchema = z.object({
+  targetKind: z.literal("post").optional().describe("Optional target-kind marker copied from a Turnfeed reply handoff."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable public reply target label for the action summary, for example Taylor Lee's public Turnfeed post about launch notes. Do not use a raw post id."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being replied to, from feed, thread context, or check_reply_before_publishing. Keeps the action summary tied to visible content instead of only an internal post id."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Exact public reply text the user supplied for publishing, or an exact identifiable reply draft previously displayed in this conversation that the user explicitly selects for publication now. Preserve that version verbatim and keep it within ${MAX_REPLY_CHARS} characters. Publishing makes this exact reply visible on Turnfeed with the user's public profile name/handle. Use this field only after the user explicitly requests publication with the exact target and text. Do not draft, rewrite, infer, or publish from a preflight-only turn. Do not publish from a drafting or revision request or choose between ambiguous draft versions. Do not publish intent-only commands such as "I want to reply". Turnfeed validates the supplied text before publishing.`),
+  visibility: z.enum(["public"]).describe("Required public-write acknowledgement. Use public because this reply will be visible on Turnfeed with the user's public profile name/handle."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed, thread context, or check_reply_before_publishing."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed, thread context, or check_reply_before_publishing, used only to disambiguate matching posts."),
+  clientId: z.string().trim().min(1).max(MAX_CLIENT_ID_CHARS).describe("Required stable client request id for retry-safe duplicate suppression. Use a fresh id for each new public write attempt; reuse the same clientId only when retrying the same exact public write request."),
+});
+const legacyReplyToPostInputSchema = z.object({
+  postId: z.string().trim().min(1).max(64).optional().describe("Legacy fallback post id from older ChatGPT reply flows. This is only a disambiguator; targetLabel and postText describe the public reply target."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable public reply target label for the action summary, for example Taylor Lee's public Turnfeed post about launch notes. Do not use a raw post id."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being replied to, from feed or thread context. Keeps the action summary tied to visible content instead of only an internal post id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Exact public reply text the user supplied for publishing through the compatibility path. Keep it within ${MAX_REPLY_CHARS} characters. Use this field only after the user explicitly requests publication with the exact target and text. Publishing makes this exact reply visible on Turnfeed with the user's public profile name/handle. Do not publish intent-only commands such as "I want to reply"; open the reply composer or ask for the exact reply text instead. Turnfeed validates the supplied text before publishing.`),
+  visibility: z.enum(["public"]).describe("Required public-write acknowledgement. Use public because this reply will be visible on Turnfeed with the user's public profile name/handle."),
+  clientId: z.string().trim().min(1).max(MAX_CLIENT_ID_CHARS).describe("Required stable client request id for retry-safe duplicate suppression. Use a fresh id for each new public write attempt; reuse the same clientId only when retrying the same exact public write request."),
+});
+const reportPostInputSchema = z.object({
+  postId: z.string().min(1).max(64).optional().describe("Internal fallback post id. Human-readable target fields from feed or thread context keep the action summary tied to the person and post instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable report target label for the action summary, for example Taylor Lee's post about launch notes. Do not use a raw post id."),
+  authorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the post author, without the leading @, from feed or thread context."),
+  postText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the post being reported so the action summary shows content, not only an internal id."),
+  createdAt: z.string().trim().max(64).optional().describe("Original post timestamp from feed or thread context, used only to disambiguate matching posts."),
+  reason: reportReasonInputSchema("post"),
+});
+const likeReplyInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback reply id. Human-readable target fields keep the action summary tied to the person and reply instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable reply target label for the action summary. Do not use a raw reply id. The like or unlike is a Turnfeed social action that can be visible to people using Turnfeed."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, from thread context."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the reply being liked or unliked so the action summary shows content, not only an internal id."),
+  parentPostText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the parent post, used to disambiguate the reply target."),
+  createdAt: z.string().trim().max(64).optional().describe("Original reply timestamp from thread context, used only to disambiguate matching replies."),
+  action: z.enum(LIKE_ACTIONS).optional().describe("Whether to like or unlike. Likes are Turnfeed social signals that can be visible in the app and notifications."),
+});
+const deleteReplyInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback reply id. Human-readable target fields keep the action summary tied to the person and reply instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).optional().describe("Optional human-readable reply target label for the action summary, for example your Turnfeed reply beginning \"Thanks for sharing\". Do not use a raw reply id."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Optional public handle of the reply author, without the leading @. For a request to delete \"my reply\", omit this field unless the user's public handle is already known; never invent one."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the user's reply being deleted: use the exact text or a sufficiently specific beginning so the action summary shows content, not only an internal id."),
+  parentPostText: z.string().trim().min(1).max(700).optional().describe("Optional visible text or excerpt of the parent post. Use it only when needed to disambiguate multiple replies by the user; opening the full thread first is not required."),
+  createdAt: z.string().trim().max(64).optional().describe("Optional original reply timestamp, used only to disambiguate multiple matching replies by the user."),
+});
+const replyToReplyInputSchema = z.object({
+  targetKind: z.literal("reply").optional().describe("Optional target-kind marker copied from a Turnfeed reply handoff."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable public nested-reply target label for the action summary, for example Maya Chen's public Turnfeed reply in Taylor Lee's thread. Do not use a raw reply id."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the reply being replied to, from thread context or check_reply_before_publishing. Identifies the public reply content alongside its internal id."),
+  parentPostText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the parent post, from thread context or check_reply_before_publishing to disambiguate the reply target."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Exact public reply text the user supplied for publishing, or an exact identifiable reply draft previously displayed in this conversation that the user explicitly selects for publication now. Preserve that version verbatim and keep it within ${MAX_REPLY_CHARS} characters. Publishing makes this exact nested reply visible on Turnfeed with the user's public profile name/handle. Use this field only after the user explicitly requests publication with the exact target and text. Do not draft, rewrite, infer, or publish from a preflight-only turn. Do not publish from a drafting or revision request or choose between ambiguous draft versions. Do not publish intent-only commands such as "I want to reply". Turnfeed validates the supplied text before publishing.`),
+  visibility: z.enum(["public"]).describe("Required public-write acknowledgement. Use public because this nested reply will be visible on Turnfeed with the user's public profile name/handle."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, from thread context or check_reply_before_publishing."),
+  createdAt: z.string().trim().max(64).optional().describe("Original reply timestamp from thread context or check_reply_before_publishing, used only to disambiguate matching replies."),
+  clientId: z.string().trim().min(1).max(MAX_CLIENT_ID_CHARS).describe("Required stable client request id for retry-safe duplicate suppression. Use a fresh id for each new public write attempt; reuse the same clientId only when retrying the same exact public write request."),
+});
+const legacyReplyToReplyInputSchema = z.object({
+  replyId: z.string().trim().min(1).max(64).optional().describe("Legacy fallback reply id from older ChatGPT nested-reply flows. This is only a disambiguator; targetLabel, replyText, and parentPostText describe the public reply target."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable public nested-reply target label for the action summary, for example Maya Chen's public Turnfeed reply in Taylor Lee's thread. Do not use a raw reply id."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, from thread context."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the reply being replied to, from thread context. Identifies the public reply content alongside its internal id."),
+  parentPostText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the parent post, from thread context to disambiguate the reply target."),
+  createdAt: z.string().trim().max(64).optional().describe("Original reply timestamp from thread context, used only to disambiguate matching replies."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Exact public nested-reply text the user supplied for publishing through the compatibility path. Keep it within ${MAX_REPLY_CHARS} characters. Use this field only after the user explicitly requests publication with the exact target and text. Publishing makes this exact reply visible on Turnfeed with the user's public profile name/handle. Do not publish intent-only commands such as "I want to reply"; open the reply composer or ask for the exact reply text instead. Turnfeed validates the supplied text before publishing.`),
+  visibility: z.enum(["public"]).describe("Required public-write acknowledgement. Use public because this nested reply will be visible on Turnfeed with the user's public profile name/handle."),
+  clientId: z.string().trim().min(1).max(MAX_CLIENT_ID_CHARS).describe("Required stable client request id for retry-safe duplicate suppression. Use a fresh id for each new public write attempt; reuse the same clientId only when retrying the same exact public write request."),
+});
+const editReplyInputSchema = z.object({
+  id: z.string().trim().min(1).max(64).optional().describe("Internal fallback reply id. Human-readable target fields keep the action summary tied to the person and reply instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable reply target label for the action summary. Do not use a raw reply id."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, from thread context."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the reply being edited so the action summary shows content, not only an internal id."),
+  parentPostText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the parent post, used to disambiguate the reply target."),
+  createdAt: z.string().trim().max(64).optional().describe("Original reply timestamp from thread context, used only to disambiguate matching replies."),
+  text: z.string().trim().min(1).max(MAX_REPLY_CHARS).describe(`Updated public reply text exactly as the user supplied it. Keep it within ${MAX_REPLY_CHARS} characters. Turnfeed validates the supplied text before saving.`),
+  correctionReason: z.string().trim().min(MIN_CORRECTION_REASON_CHARS).max(MAX_CORRECTION_REASON_CHARS).optional().describe("Backward-compatible optional public author edit note. Never ask the user for this and never invent it; omit it unless the user independently supplied an edit note in the same request. Turnfeed always preserves the prior text and timestamps in immutable read-only edit history.").meta({ deprecated: true }),
+});
+const canonicalEditReplyInputSchema = editReplyInputSchema.omit({ correctionReason: true });
+const reportReplyInputSchema = z.object({
+  id: z.string().min(1).max(64).optional().describe("Internal fallback reply id. Human-readable target fields from thread context keep the action summary tied to the person and reply instead of a raw id."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable report target label for the action summary. Do not use a raw reply id."),
+  replyAuthorHandle: z.string().trim().max(MAX_HANDLE_CHARS).optional().describe("Public handle of the reply author, without the leading @, from thread context."),
+  replyText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the reply being reported so the action summary shows content, not only an internal id."),
+  parentPostText: z.string().trim().min(1).max(700).describe("Required visible text or excerpt of the parent post, used to disambiguate the reply target."),
+  createdAt: z.string().trim().max(64).optional().describe("Original reply timestamp from thread context, used only to disambiguate matching replies."),
+  reason: reportReasonInputSchema("reply"),
+});
+const followUserInputSchema = z.object({
+  handle: z.string().trim().min(MIN_HANDLE_CHARS).max(MAX_HANDLE_CHARS).optional().describe("Public handle of the Turnfeed user to follow or unfollow, without the leading @. Use targetRef instead when the member has no public handle. Follow changes are Turnfeed social signals that can be visible in profiles, follower lists, and notifications."),
+  targetRef: relationshipTargetRefInputSchema.optional(),
+  action: z.enum(["follow", "unfollow"]).optional().describe("Whether to follow or unfollow. Follow changes are Turnfeed social signals that can be visible in profiles, follower lists, and notifications."),
+});
+const blockUserInputSchema = z.object({
+  handle: z.string().trim().min(MIN_HANDLE_CHARS).max(MAX_HANDLE_CHARS).optional(),
+  targetRef: relationshipTargetRefInputSchema.optional(),
+  action: z.enum(["block", "unblock"]).optional(),
+});
+const candidateLikePostInputSchema = likePostInputSchema.extend({
+  action: z.enum(["like", "unlike"]).describe("Required exact desired state. Use like or unlike; never use toggle. Likes are Turnfeed social signals that can be visible in the app and notifications."),
+});
+const candidatePinPostInputSchema = pinPostInputSchema.extend({
+  action: z.enum(["pin", "unpin"]).describe("Required exact desired state. Use pin or unpin; never use toggle."),
+});
+const candidateLikeReplyInputSchema = likeReplyInputSchema.extend({
+  action: z.enum(["like", "unlike"]).describe("Required exact desired state. Use like or unlike; never use toggle. Likes are Turnfeed social signals that can be visible in the app and notifications."),
+});
+const candidateFollowUserInputSchema = followUserInputSchema.extend({
+  sourcePostId: z.string().trim().min(1).max(64).optional().describe("Machine-readable postId returned by get_thread_context or by a visible recent post on an open profile. This identifies the author for follow or unfollow when the public read returned neither a public handle nor a viewer-bound targetRef. Keep it out of targetLabel."),
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable user target for the action summary. Use the exact display name, public @handle, or member alias returned by Turnfeed; never use a targetRef or internal id as the label."),
+  action: z.enum(["follow", "unfollow"]).describe("Required exact desired state. Use follow or unfollow; never omit the action."),
+});
+const candidateBlockUserInputSchema = blockUserInputSchema.extend({
+  targetLabel: z.string().trim().min(1).max(240).describe("Required human-readable user target for the action summary. Use the exact display name, public @handle, or member alias returned by Turnfeed; never use a targetRef or internal id as the label."),
+  action: z.enum(["block", "unblock"]).describe("Required exact desired state. Use block or unblock; never omit the action."),
+});
+const createGroupInputSchema = z.object({
+  name: z.string().trim().min(1).max(MAX_GROUP_NAME_CHARS),
+  description: z.string().trim().max(MAX_GROUP_DESC_CHARS).optional(),
+  visibility: z.enum(["public", "private"]).optional(),
+});
+const joinGroupInputSchema = z.object({ id: z.string().min(1).max(64) });
+const leaveGroupInputSchema = z.object({ id: z.string().min(1).max(64) });
+const inviteToGroupInputSchema = z.object({
+  id: z.string().min(1).max(64),
+  handle: z.string().trim().min(MIN_HANDLE_CHARS).max(MAX_PEOPLE_QUERY_CHARS),
+});
+const updateGroupInputSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().trim().min(1).max(MAX_GROUP_NAME_CHARS).optional(),
+  description: z.string().trim().max(MAX_GROUP_DESC_CHARS).optional(),
+  visibility: z.enum(["public", "private"]).optional(),
+});
+const revokeGroupInviteInputSchema = z.object({
+  id: z.string().min(1).max(64),
+  handle: z.string().trim().min(MIN_HANDLE_CHARS).max(MAX_PEOPLE_QUERY_CHARS),
+});
+const removeGroupMemberInputSchema = z.object({
+  id: z.string().min(1).max(64),
+  handle: z.string().trim().min(MIN_HANDLE_CHARS).max(MAX_PEOPLE_QUERY_CHARS),
+});
+const deleteGroupInputSchema = z.object({ id: z.string().min(1).max(64) });
+const turnfeedStructuredOutputSchema = z.object({
+  ok: z.boolean().optional(),
+  message: z.string().optional(),
+  readOnly: z.boolean().optional(),
+  mutatesTurnfeed: z.boolean().optional(),
+  readOnlyNotice: z.string().optional(),
+  disallowedActions: z.array(z.string()).optional(),
+  userGeneratedContentBoundary: z.string().optional(),
+  instructionBoundary: z.string().optional(),
+  serverTime: z.string().optional(),
+  status: z.number().optional(),
+  code: z.string().optional(),
+  retryAfterSec: z.number().optional(),
+}).loose();
+
+// Feed and thread context are consumed directly by ChatGPT's host renderer.
+// Keep these contracts closed and intentionally small so structured deltas
+// stay typed instead of asking the host to infer arbitrary nested values.
+const threadTargetArgumentsOutputSchema = z.object({
+  targetKind: z.enum(["post", "reply"]),
+  targetLabel: z.string(),
+  authorHandle: z.string().optional(),
+  postText: z.string().optional(),
+  replyAuthorHandle: z.string().optional(),
+  replyText: z.string().optional(),
+  parentPostText: z.string().optional(),
+  createdAt: z.string(),
+}).strict();
+const threadReplyHandoffOutputSchema = z.object({
+  publishTool: z.enum([TURNFEED_PUBLIC_REPLY_TO_POST_TOOL, TURNFEED_PUBLIC_REPLY_TO_REPLY_TOOL]),
+  targetKind: z.enum(["post", "reply"]),
+  targetArguments: threadTargetArgumentsOutputSchema,
+  publicVisibility: z.literal("public"),
+}).strict();
+const socialMediaAttachmentOutputSchema = z.object({
+  type: z.enum(["image", "video", "link"]),
+  url: z.string(),
+}).strict();
+const threadQuoteOutputSchema = z.object({
+  unavailable: z.boolean(),
+  text: z.string().optional(),
+  createdAt: z.string().datetime().optional(),
+  createdAtLabel: z.string().optional(),
+  authorName: z.string().optional(),
+  authorPublicHandle: z.string().optional(),
+  authorTargetRef: z.string().optional(),
+  mediaCount: z.number().optional(),
+  media: z.array(socialMediaAttachmentOutputSchema).max(TOOL_QUOTE_MEDIA_PREVIEW_LIMIT).optional(),
+}).strict();
+const correctionHistoryEntryOutputSchema = z.object({
+  text: z.string(),
+  reason: z.string().optional(),
+  startedAt: z.string(),
+  correctedAt: z.string(),
+}).strict();
+const legacyCorrectionHistoryEntryOutputSchema = correctionHistoryEntryOutputSchema.extend({
+  reason: z.string(),
+}).strict();
+const threadPostOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  authorName: z.string(),
+  authorPublicHandle: z.string(),
+  authorTargetRef: z.string(),
+  viewerIsAuthor: z.boolean().optional().describe("True or false only when Turnfeed received verified viewer identity; omitted for anonymous reads."),
+  viewerHasLiked: z.boolean().optional().describe("Whether the verified viewer has liked this post; omitted for anonymous reads."),
+  text: z.string(),
+  createdAt: z.string().datetime().optional(),
+  createdAtLabel: z.string(),
+  mediaCount: z.number(),
+  media: z.array(socialMediaAttachmentOutputSchema).max(TOOL_FEED_MEDIA_PREVIEW_LIMIT),
+  quote: threadQuoteOutputSchema.nullable(),
+  correctionHistory: z.array(correctionHistoryEntryOutputSchema).max(MAX_CORRECTIONS_PER_TARGET),
+  correctionHistoryUnavailable: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  archivedAt: z.string().optional(),
+}).strict();
+const threadReplyOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  text: z.string(),
+  createdAt: z.string().datetime().optional(),
+  createdAtLabel: z.string(),
+  authorName: z.string(),
+  authorPublicHandle: z.string(),
+  authorTargetRef: z.string(),
+  viewerIsAuthor: z.boolean().optional().describe("True or false only when Turnfeed received verified viewer identity; omitted for anonymous reads."),
+  viewerHasLiked: z.boolean().optional().describe("Whether the verified viewer has liked this reply; omitted for anonymous reads."),
+  replyToAuthorName: z.string(),
+  replyToAuthorHandle: z.string(),
+  correctionHistory: z.array(correctionHistoryEntryOutputSchema).max(MAX_CORRECTIONS_PER_TARGET),
+  correctionHistoryUnavailable: z.boolean().optional(),
+  replyHandoff: threadReplyHandoffOutputSchema.optional(),
+}).strict();
+const threadContextOutputSchema = z.object({
+  ok: z.boolean(),
+  displayText: z.string().max(FEED_DIGEST_STRUCTURED_MAX_BYTES).optional().describe("Exact people-facing thread text for verbatim ordinary display, without internal boundary markers. Omitted only when duplicating the complete text would exceed the transport budget; MCP text content and structured source bodies remain complete for the returned page. Structured source data supports requested summaries, comparisons, translations, factual answers and private drafts with source attribution."),
+  error: z.string().optional(),
+  postId: z.string(),
+  viewerOwnsTarget: z.boolean().optional().describe("Verified ownership signal. When true, the opened post belongs to the signed-in user; do not call follow_user for its author."),
+  selfFollowMessage: z.literal(TURNFEED_SELF_FOLLOW_MESSAGE).optional().describe("Plain response to use only if the user asks to follow an author verified as themselves."),
+  userGeneratedContentBoundary: z.string().optional(),
+  defaultResponseStyle: z.string().optional(),
+  thread: threadPostOutputSchema.optional(),
+  recentReplies: z.array(threadReplyOutputSchema).max(THREAD_CONTEXT_REPLY_LIMIT).optional(),
+  totalReplyCount: z.number().optional(),
+  hasMore: z.boolean().optional(),
+  nextCursor: z.string().optional(),
+  replyHandoff: threadReplyHandoffOutputSchema.optional(),
+}).strict();
+const legacyThreadPostOutputSchema = threadPostOutputSchema.omit({ viewerHasLiked: true }).extend({
+  correctionHistory: z.array(legacyCorrectionHistoryEntryOutputSchema).max(MAX_CORRECTIONS_PER_TARGET),
+}).strict();
+const legacyThreadReplyOutputSchema = threadReplyOutputSchema.omit({ viewerHasLiked: true }).extend({
+  correctionHistory: z.array(legacyCorrectionHistoryEntryOutputSchema).max(MAX_CORRECTIONS_PER_TARGET),
+}).strict();
+const legacyThreadContextOutputSchema = threadContextOutputSchema.omit({ displayText: true }).extend({
+  thread: legacyThreadPostOutputSchema.optional(),
+  recentReplies: z.array(legacyThreadReplyOutputSchema).max(THREAD_CONTEXT_REPLY_LIMIT).optional(),
+}).strict();
+const feedReplyPreviewOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  authorName: z.string(),
+  authorPublicHandle: z.string(),
+  authorTargetRef: z.string(),
+  text: z.string(),
+  createdAtLabel: z.string(),
+  createdAt: z.string().datetime().optional(),
+  previewTruncated: z.boolean(),
+  contextLabel: z.string().optional(),
+}).strict();
+const feedQuotePreviewOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  unavailable: z.boolean(),
+  authorName: z.string(),
+  authorPublicHandle: z.string(),
+  authorTargetRef: z.string(),
+  text: z.string(),
+  createdAtLabel: z.string(),
+  createdAt: z.string().datetime().optional(),
+  mediaCount: z.number(),
+  media: z.array(socialMediaAttachmentOutputSchema).max(TOOL_QUOTE_MEDIA_PREVIEW_LIMIT),
+}).strict();
+const feedDigestItemOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  postId: z.string(),
+  authorName: z.string(),
+  authorPublicHandle: z.string(),
+  authorTargetRef: z.string(),
+  text: z.string(),
+  previewTruncated: z.boolean(),
+  createdAtLabel: z.string(),
+  createdAt: z.string().datetime().optional(),
+  archived: z.boolean().optional(),
+  archivedAt: z.string().optional(),
+  activityLabel: z.string().optional(),
+  mediaCount: z.number(),
+  media: z.array(socialMediaAttachmentOutputSchema).max(TOOL_FEED_MEDIA_PREVIEW_LIMIT),
+  quote: feedQuotePreviewOutputSchema.nullable(),
+  recentReplies: z.array(feedReplyPreviewOutputSchema).max(1),
+}).strict();
+const legacyFeedDigestOutputSchema = z.object({
+  ok: z.boolean(),
+  userGeneratedContentBoundary: z.string(),
+  defaultResponseStyle: z.string(),
+  displayText: z.string().max(FEED_DIGEST_STRUCTURED_MAX_BYTES).describe("Exact people-facing feed text without internal boundary markers. For ordinary display, show verbatim once without reconstructing or reordering. For requested analysis or factual answers, use structured data with source attribution."),
+  digestKind: z.enum(FEED_DIGEST_FOCUSES),
+  digestTitle: z.string(),
+  items: z.array(feedDigestItemOutputSchema).max(MAX_CONTEXT_DIGEST_LIMIT),
+  hasMore: z.boolean(),
+  nextCursor: z.string(),
+  cursorResetRequired: z.boolean().optional(),
+}).strict();
+const feedDigestOutputSchema = legacyFeedDigestOutputSchema.extend({
+  activityWindow: z.enum(FEED_ACTIVITY_WINDOWS).optional(),
+  timeRange: z.object({ basis: z.enum(["created", "activity"]), since: z.string(), until: z.string() }).strict().optional(),
+  serverTime: z.string().optional(),
+}).strict();
+const inboxFollowerOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  displayName: z.string(),
+  publicHandle: z.string(),
+  targetRef: z.string(),
+  bio: z.string(),
+  websiteUrl: z.string(),
+  viewerRelationshipLabel: z.string(),
+  followerCount: z.number(),
+  followingCount: z.number(),
+}).strict();
+const inboxNotificationOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  type: z.string(),
+  actorName: z.string(),
+  actorPublicHandle: z.string(),
+  actorTargetRef: z.string(),
+  createdAtLabel: z.string(),
+  text: z.string(),
+  postId: z.string(),
+  replyId: z.string(),
+  groupId: z.string(),
+  groupName: z.string(),
+  responsePriority: z.string(),
+  responsePriorityLabel: z.string(),
+  replyWorthy: z.boolean(),
+  threadArchived: z.boolean(),
+  threadSummary: z.string(),
+  worthOpeningReason: z.string(),
+  openThreadCue: z.string(),
+}).strict();
+const inboxRelationshipOutputSchema = z.object({
+  contentKind: z.literal(TURNFEED_USER_CONTENT_KIND),
+  instructionBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  relationshipKind: z.enum(["following", "blocked"]),
+  displayName: z.string(),
+  publicHandle: z.string(),
+  memberAlias: z.string(),
+  targetRef: z.string(),
+}).strict();
+const turnfeedInboxOutputSchema = z.object({
+  ok: z.boolean(),
+  displayText: z.string().max(FEED_DIGEST_STRUCTURED_MAX_BYTES).optional().describe("Exact people-facing inbox or relationship-list text for verbatim ordinary display, without internal boundary markers. Omitted if the extra copy exceeds the structured UTF-8 budget; original MCP text and structured source data are retained. Structured source data supports requested questions and summaries with source attribution."),
+  userGeneratedContentBoundary: z.literal(TURNFEED_USER_CONTENT_BOUNDARY),
+  kind: z.enum(["followers", "notifications", "relationships"]),
+  title: z.string(),
+  defaultResponseStyle: z.string(),
+  filter: z.enum(NOTIFICATION_FILTERS).optional(),
+  notificationOrder: z.enum(NOTIFICATION_ORDERS).optional(),
+  followers: z.array(inboxFollowerOutputSchema).max(DEFAULT_PEOPLE_LIMIT).optional(),
+  followerCount: z.number().optional(),
+  visibleFollowerCount: z.number().optional(),
+  returnedFollowerCount: z.number().optional(),
+  notifications: z.array(inboxNotificationOutputSchema).max(DEFAULT_PEOPLE_LIMIT).optional(),
+  notificationCount: z.number().optional(),
+  visibleNotificationCount: z.number().optional(),
+  returnedNotificationCount: z.number().optional(),
+  relationshipKind: z.enum(["following", "blocked"]).optional(),
+  relationshipQuery: z.string().optional(),
+  relationships: z.array(inboxRelationshipOutputSchema).max(DEFAULT_PEOPLE_LIMIT).optional(),
+  relationshipCount: z.number().optional(),
+  visibleRelationshipCount: z.number().optional(),
+  returnedRelationshipCount: z.number().optional(),
+  hasMore: z.boolean(),
+  nextCursor: z.string().optional(),
+  cursorResetRequired: z.boolean().optional(),
+}).strict();
+const turnfeedReadRouterOutputSchema = turnfeedStructuredOutputSchema.omit({
+  readOnly: true,
+  mutatesTurnfeed: true,
+  readOnlyNotice: true,
+  disallowedActions: true,
+}).extend({
+  postDeletionPreview: z.object({
+    postCount: z.number().int().min(0),
+    replyCount: z.number().int().min(0),
+    confirmationRequired: z.boolean().describe("True when there are posts to delete. Confirmation requires a subsequent user message after the exact scope and question have been displayed and the preview turn has ended. This flag is not evidence of authorization."),
+    message: z.string(),
+    deleteArguments: z.object({
+      scope: z.literal("all_my_posts"),
+      targetLabel: z.string(),
+      postText: z.string(),
+      deletionRef: z.string().max(512),
+    }).strict().optional(),
+  }).strict().optional().describe("Read-only posts-only deletion summary. Deletion requires the exact scope and 'Delete these posts?' to have been displayed, the preview turn to have ended, and a subsequent user message confirming that scope before the exact deleteArguments are sent to delete_post. The initial request, read permission and snapshot token are not confirmation. The opaque token is an internal argument, not human-facing confirmation text."),
+  viewerOwnsTarget: z.boolean().optional().describe("True when the opened profile or post belongs to the user identified by verified Turnfeed sign-in. Self-following is unsupported."),
+  selfFollowMessage: z.literal(TURNFEED_SELF_FOLLOW_MESSAGE).optional().describe("Explanation for a requested self-follow relationship, when the profile or post author is verified as the signed-in user."),
+  defaultResponseStyle: z.string().optional(),
+  displayText: z.string().max(FEED_DIGEST_STRUCTURED_MAX_BYTES).optional().describe("Exact people-facing feed, search, thread or profile text for verbatim ordinary display, without internal boundary markers. For thread/profile reads, this optional copy can be omitted to meet transport or structured UTF-8 budgets; original MCP text and structured source data are retained. Structured source data supports requested summaries, comparisons, translations, factual answers and private drafts with source attribution."),
+  digestKind: z.enum(FEED_DIGEST_FOCUSES).optional(),
+  digestTitle: z.string().optional(),
+  items: z.array(feedDigestItemOutputSchema).max(MAX_CONTEXT_DIGEST_LIMIT).optional(),
+  hasMore: z.boolean().optional(),
+  nextCursor: z.string().optional(),
+  cursorResetRequired: z.boolean().optional(),
+}).loose();
+
+  return {
+    createPostInputSchema,
+    canonicalCreatePostInputSchema,
+    canonicalEditPostInputSchema,
+    setProfileInputSchema,
+    canonicalSetProfileInputSchema,
+    OPEN_SOCIAL_TARGET_KINDS,
+    turnfeedRouterInputSchema,
+    turnfeedPublicRouterInputSchema,
+    turnfeedStartInputSchema,
+    turnfeedFeedRouterInputSchema,
+    turnfeedInboxInputSchema,
+    FEED_DIGEST_FOCUSES,
+    FEED_ACTIVITY_WINDOWS,
+    feedDigestBaseInputSchema,
+    feedDigestInputSchema,
+    turnfeedProtocolInputSchema,
+    threadContextInputSchema,
+    replyPreflightInputSchema,
+    likePostInputSchema,
+    deletePostInputSchema,
+    candidateDeletePostInputSchema,
+    pinPostInputSchema,
+    replyToPostInputSchema,
+    legacyReplyToPostInputSchema,
+    reportPostInputSchema,
+    likeReplyInputSchema,
+    deleteReplyInputSchema,
+    replyToReplyInputSchema,
+    legacyReplyToReplyInputSchema,
+    canonicalEditReplyInputSchema,
+    reportReplyInputSchema,
+    followUserInputSchema,
+    blockUserInputSchema,
+    candidateLikePostInputSchema,
+    candidatePinPostInputSchema,
+    candidateLikeReplyInputSchema,
+    candidateFollowUserInputSchema,
+    candidateBlockUserInputSchema,
+    createGroupInputSchema,
+    joinGroupInputSchema,
+    leaveGroupInputSchema,
+    inviteToGroupInputSchema,
+    updateGroupInputSchema,
+    revokeGroupInviteInputSchema,
+    removeGroupMemberInputSchema,
+    deleteGroupInputSchema,
+    turnfeedStructuredOutputSchema,
+    threadContextOutputSchema,
+    legacyThreadContextOutputSchema,
+    legacyFeedDigestOutputSchema,
+    feedDigestOutputSchema,
+    turnfeedInboxOutputSchema,
+    turnfeedReadRouterOutputSchema,
+  };
+}

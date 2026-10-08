@@ -1,0 +1,18 @@
+Turnfeed source and attribution
+
+The ISC license in LICENSE applies to Turnfeed source code and documentation,
+including the user-owned source retained under vendor/turnfeed from
+TheodorNEngoy/chatgpt-social-mvp commit
+1e1aa821f983f4e8234a16f68fe15915dc5aef26 and its generated/adapted code.
+
+The Turnfeed name, logo and other brand assets are reserved. The ISC grant does
+not cover assets/turnfeed-logo.png or the embedded image bytes generated from
+it in worker/brand.generated.mjs and build outputs. No trademark rights or
+endorsement are granted. Replace these assets and branding for an independent
+service, or obtain separate permission from the owner.
+
+Third-party dependencies retain their own licenses and copyright notices.
+package-lock.json records the dependency versions and license identifiers;
+the installed packages contain their complete license terms. This project does
+not relicense those dependencies. Preserve applicable notices when redistributing
+source or bundles.

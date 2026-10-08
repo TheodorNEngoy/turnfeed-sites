@@ -1,0 +1,28 @@
+{
+  "name": "turnfeed-sites-native",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extract": "node scripts/extract-core.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "db:generate": "drizzle-kit generate",
+    "build:deployment": "node scripts/build.mjs --deployment",
+    "preview": "node scripts/preview-web.mjs",
+    "preview:built": "node scripts/preview-web.mjs --built"
+  },
+  "dependencies": {
+    "zod": "4.2.1"
+  },
+  "devDependencies": {
+    "acorn": "8.15.0",
+    "esbuild": "0.25.10",
+    "drizzle-orm": "0.44.5",
+    "drizzle-kit": "0.31.4"
+  },
+  "license": "ISC",
+  "engines": {
+    "node": "25.5.0"
+  }
+}
