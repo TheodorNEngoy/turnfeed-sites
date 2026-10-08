@@ -12,7 +12,7 @@ const objectPaths = new Set(['', 'snapshot', 'controls', 'operator',
   'snapshot.moderationHistory', 'snapshot.writeReceipts', 'snapshot.mcpEvents',
   'snapshot.profiles', 'snapshot.follows', 'snapshot.blocks',
   'snapshot.notificationSuppressionCutoffs', 'snapshot.viewerStates',
-  'snapshot.writeReceipts.owners', 'profileNameChoices', 'operator.revoked']);
+  'snapshot.writeReceipts.owners', 'profileNameChoices', 'operator.revoked', 'receiptOwners']);
 const arrayPaths = new Set(['snapshot.posts', 'snapshot.reports', 'snapshot.groups',
   'snapshot.followEvents', 'snapshot.inviteEvents', 'snapshot.likeEvents', 'snapshot.users',
   'snapshot.moderationHistory.events', 'snapshot.mcpEvents.subscriptions', 'snapshot.mcpEvents.outbox',

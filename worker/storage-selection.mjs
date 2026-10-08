@@ -26,7 +26,7 @@ export async function readSelection(db, budget = { remaining: 45 }) {
     SELECT 1 AS kind, json_array(r.record_id, r.part, r.digest,
       CASE WHEN r.record_id = 'manifest' OR h.bytes <= ? THEN r.value ELSE NULL END) AS payload
     FROM turnfeed_state_records r JOIN turnfeed_state_head h
-      ON h.id = 1 AND h.storage_format = 2 AND h.bytes <= ? AND h.chunks <= ?`)
+      ON h.id = 1 AND h.storage_format IN (2, 3) AND h.bytes <= ? AND h.chunks <= ?`)
     .bind(SMALL_SELECTION_BYTES, MAX_DOCUMENT_BYTES, MAX_RECORD_ROWS).all();
   if (response.success === false || !Array.isArray(response.results)) corrupt();
   if (!response.results.length) return null; // First use follows normal initialization.
@@ -34,7 +34,7 @@ export async function readSelection(db, budget = { remaining: 45 }) {
   if (headers.length !== 1) corrupt();
   const head = parse(headers[0].payload);
   if (head.storage_format === 1) return null; // Preserve normal legacy migration.
-  if (head.storage_format !== 2 || typeof head.revision !== 'string'
+  if (![2, 3].includes(head.storage_format) || typeof head.revision !== 'string'
       || !Number.isSafeInteger(head.chunks) || head.chunks < 1 || head.chunks > MAX_RECORD_ROWS
       || !Number.isSafeInteger(head.bytes) || head.bytes < 1 || head.bytes > MAX_DOCUMENT_BYTES) corrupt();
   const rows = new Map(), documents = new Map();
@@ -137,7 +137,7 @@ export async function readSelection(db, budget = { remaining: 45 }) {
         const reply = await db.prepare(`SELECT h.revision, r.record_id, r.part, r.value
           FROM turnfeed_state_head h LEFT JOIN turnfeed_state_records r
             ON r.record_id IN (SELECT value FROM json_each(?))
-          WHERE h.id = 1 AND h.storage_format = 2 AND h.revision = ?
+          WHERE h.id = 1 AND h.storage_format IN (2, 3) AND h.revision = ?
           ORDER BY r.record_id, r.part`).bind(JSON.stringify(missing), head.revision).all();
         if (reply.success === false || !Array.isArray(reply.results)) corrupt();
         if (!reply.results.length) changed();

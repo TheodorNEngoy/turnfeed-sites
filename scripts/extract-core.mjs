@@ -83,7 +83,7 @@ console.log('Runtime imports:', [...groupedImports.keys()].join(', '));
 const allowedModules = new Set(['node:crypto', 'node:async_hooks', 'node:net', 'zod']);
 const importLines = [...groupedImports].map(([path, names]) => {
   if (!path.startsWith('./lib/') && !allowedModules.has(path)) throw new Error(`Unadapted runtime dependency: ${path} (${names.join(', ')})`);
-  const destination = path === './lib/mcp-schemas.mjs' ? './mcp-schemas.generated.mjs' : path === './lib/feed-presentation.mjs' ? './feed-presentation.mjs' : path === './lib/moderation-history.mjs' ? './moderation-history.mjs'
+  const destination = path === './lib/public-write-receipts.mjs' ? './public-write-receipts.mjs' : path === './lib/mcp-schemas.mjs' ? './mcp-schemas.generated.mjs' : path === './lib/feed-presentation.mjs' ? './feed-presentation.mjs' : path === './lib/moderation-history.mjs' ? './moderation-history.mjs'
     : path.startsWith('./lib/') ? `../vendor/turnfeed/${path.slice(2)}` : path;
   const statement = names.some(n => n.startsWith('*')) ? names.join(', ') : `{ ${names.join(', ')} }`;
   return `import ${statement} from ${JSON.stringify(destination)};`;

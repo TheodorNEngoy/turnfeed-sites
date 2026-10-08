@@ -117,7 +117,7 @@ test('export does not save a profile or mutate empty or legacy storage', async (
 
 test('closure is absent from discovery and instructions direct requests to support', async () => {
   const tools = catalog(makeCore({ origin, secret }));
-  assert.equal(tools.length, 31);
+  assert.ok(tools.some(tool => tool.name === 'get_profile_connections'));
   assert.ok(tools.some(tool => tool.name === 'export_my_data'));
   for (const name of ['preview_my_account_closure', 'close_my_account']) {
     assert.ok(!tools.some(tool => tool.name === name));

@@ -5,7 +5,8 @@ posts and threaded replies, profiles, photos, likes, following, private accounts
 notification activity, reports and operator moderation. Website and native tools
 share the same handlers and data.
 
-This source snapshot is prepared from native version 37, commit `292155f`.
+This repository tracks native Turnfeed updates through Site version 44,
+including the receipt-storage change from native commit `267ceac`.
 Hosting uses ChatGPT Sites identity, D1 storage and private R2 photo storage.
 The included local preview works with synthetic users and disposable storage.
 Public plugin distribution and host-specific behavior require separate verification.
@@ -75,9 +76,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for source-generation and migration rules
 
 Selective feed, thread and settings reads reduce some database transfer. Writes
 still hydrate full state, and feed ranking still loads the conversation trees it
-needs. The current store is bounded to 4 MiB and 8,192 rows. This is not evidence
-of production-scale capacity; see [runtime notes](docs/runtime.md) for measured
-local fixtures, photo quotas and rollback constraints.
+needs. Shared state is bounded to 4 MiB and 8,192 rows. Post/reply retry receipts
+are stored separately per account, so old receipts do not fill that shared budget.
+This is not evidence of production-scale capacity; see [runtime notes](docs/runtime.md)
+for migration, quotas, local measurements and rollback constraints.
 
 Private accounts restrict post, reply and photo access to approved followers.
 Names and handles remain discoverable. Automated moderation can reject legitimate

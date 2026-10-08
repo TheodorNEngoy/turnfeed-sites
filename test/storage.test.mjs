@@ -38,7 +38,7 @@ test('initialized legacy and record state reads need one query and perform no wr
     const writes = db.executed.length, reads = db.reads.length, budget = { remaining: 1 };
     const loaded = await readState(db, budget);
     assert.deepEqual(loaded.value, value);
-    assert.equal(loaded.storageFormat, legacy ? 1 : 2);
+    assert.equal(loaded.storageFormat, legacy ? 1 : 3);
     assert.equal(db.executed.length, writes);
     assert.equal(db.reads.length - reads, 1);
     assert.equal(budget.remaining, 0);
@@ -72,7 +72,7 @@ test('first use initializes once and preserves a concurrent first writer', async
   };
   const loaded = await readState(raced);
   assert.deepEqual(loaded.value, value);
-  assert.equal(loaded.storageFormat, 2);
+  assert.equal(loaded.storageFormat, 3);
   assert.notEqual(loaded.revision, 'empty');
 });
 
@@ -98,7 +98,7 @@ test('insufficient setup budgets and invalid read responses never initialize the
 test('an unsupported storage head is rejected without replacing it', async () => {
   const db = database();
   db.sql.prepare(`INSERT INTO turnfeed_state_head (id, revision, digest, chunks, bytes, storage_format)
-    VALUES (1, 'future', 'retained', 0, 0, 3)`).run();
+    VALUES (1, 'future', 'retained', 0, 0, 4)`).run();
   const before = db.sql.prepare('SELECT * FROM turnfeed_state_head').get();
   await assert.rejects(() => readState(db), { code: 'storage_corrupt' });
   assert.deepEqual(db.sql.prepare('SELECT * FROM turnfeed_state_head').get(), before);
@@ -122,7 +122,7 @@ test('legacy conversion is lossless, atomic and safe against a stale pre-convers
   db.failBeforeCommit = false;
   assert.equal(await store(db, original, stale), true);
   assert.deepEqual((await readState(db)).value, original);
-  assert.equal((await readState(db)).storageFormat, 2);
+  assert.equal((await readState(db)).storageFormat, 3);
   assert.equal(db.sql.prepare('SELECT count(*) AS n FROM turnfeed_state_chunks').get().n, 0);
   const rows = persistedRows(db);
   assert.equal(await store(db, { ...original, extra: 'stale' }, stale), false);
@@ -139,7 +139,7 @@ test('a successful in-chat read migrates legacy data without a synthetic profile
   const result = await invoke({ db, origin, secret, subject: '', callerKey: 'anonymous', name: 'get_feed_digest', args: { focus: 'latest', limit: 1 } });
   assert.equal(result.result.structuredContent.ok, true);
   const stored = await readState(db);
-  assert.equal(stored.storageFormat, 2);
+  assert.equal(stored.storageFormat, 3);
   assert.deepEqual(stored.value, value);
 });
 

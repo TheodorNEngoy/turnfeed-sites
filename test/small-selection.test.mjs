@@ -31,7 +31,7 @@ const call = (db, name, args = {}) => invoke({ db, origin, secret, subject: 'ali
 test('small thread and settings reads match full results with one query and no writes', async t => {
   const db = database(), value = fixture();
   await save(db, value);
-  assert.ok(encodeRecords(value).bytes < SMALL_SELECTION_BYTES);
+  assert.ok(encodeRecords({ ...value, receiptOwners: {} }).bytes < SMALL_SELECTION_BYTES);
   const batches = db.batchCount, writes = db.executed.length;
   const now = Date.now;
   Date.now = () => Date.parse('2026-10-04T13:00:00Z');
@@ -54,9 +54,9 @@ test('the 64 KiB threshold includes exact-boundary multipart values and leaves l
   for (const extra of [0, 1]) {
     const db = database(), value = fixture();
     value.retainedEvidence = '';
-    const base = encodeRecords(value).bytes;
+    const base = encodeRecords({ ...value, receiptOwners: {} }).bytes;
     value.retainedEvidence = 'x'.repeat(SMALL_SELECTION_BYTES - base + extra);
-    assert.equal(encodeRecords(value).bytes, SMALL_SELECTION_BYTES + extra);
+    assert.equal(encodeRecords({ ...value, receiptOwners: {} }).bytes, SMALL_SELECTION_BYTES + extra);
     await save(db, value); db.reads.length = 0;
     const selection = await readSelection(db);
     assert.deepEqual(await selection.project([['retainedEvidence']]), [value.retainedEvidence]);
@@ -78,7 +78,7 @@ test('small preloaded records retain payload integrity, exact byte counts and qu
   await assert.rejects(() => readSelection(db, { remaining: 0 }), { code: 'storage_busy' });
   assert.equal(db.reads.length, 0);
   const budget = { remaining: 1 }, selection = await readSelection(db, budget);
-  assert.deepEqual(await selection.project([[]]), [value]);
+  assert.deepEqual(await selection.project([[]]), [{ ...value, receiptOwners: {} }]);
   assert.equal(budget.remaining, 0);
   assert.equal(db.reads.length, 1);
 });

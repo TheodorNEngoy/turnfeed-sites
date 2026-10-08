@@ -9,7 +9,7 @@ const origin='https://turnfeed.example';
 const secret='avatar-access-local-0123456789012345678901234';
 const owner=accountKey('alice',secret), viewer=accountKey('bob',secret), id='a'.repeat(64);
 const path=photoPath(id,'image/png'), url=origin+path;
-const initial=()=>({format:1,snapshot:{version:19,posts:[],profiles:{},blocks:{}},controls:{}});
+const initial=()=>({format:1,snapshot:{version:19,writeReceipts:{schemaVersion:1,owners:{}},posts:[],profiles:{},blocks:{}},controls:{}});
 async function save(db,change,guard) {
   const loaded=await readState(db), value=loaded.value || initial();
   change(value);

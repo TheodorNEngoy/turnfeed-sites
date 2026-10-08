@@ -106,7 +106,7 @@ test('decode and encoding failures reject instead of returning an original overs
 
 test('the served composer script includes its preparation helpers without browser imports', () => {
   assert.doesNotMatch(composerScript, /^import |^export /m);
-  const context = { window: {}, document: { querySelectorAll: () => [] } };
+  const context = { window: {}, document: { querySelectorAll: () => [], querySelector: () => null } };
   assert.equal(typeof vm.runInNewContext(composerScript + '\npreparePhoto', context), 'function');
 });
 
@@ -118,7 +118,7 @@ test('the minified Worker serves a composer whose preparation helpers execute in
     const response = await builtWorker.fetch(new Request('https://turnfeed.example/assets/composer.js'), {});
     assert.equal(response.status, 200);
     const script = await response.text();
-    const context = { window: {}, document: { querySelectorAll: () => [] } };
+    const context = { window: {}, document: { querySelectorAll: () => [], querySelector: () => null } };
     const prepare = vm.runInNewContext(script + '\npreparePhoto', context);
     const b = browser(), file = source(4000, 3000, { mime: 'image/jpeg', size: 2 * 1024 * 1024 });
     const result = await prepare(file, 'post', b.win, b.doc);

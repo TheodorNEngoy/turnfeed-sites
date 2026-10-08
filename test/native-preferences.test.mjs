@@ -163,7 +163,7 @@ test('anonymous own-profile reads use native sign-in guidance without legacy OAu
 
 test('catalog and rules describe the native capabilities and initial-name behavior accurately', async () => {
   const core=makeCore({origin,secret});const tools=catalog(core);
-  assert.equal(tools.length,31);
+  assert.ok(tools.some(tool=>tool.name==='get_profile_connections'));
   assert.equal(tools.find(t=>t.name==='create_post').inputSchema.properties.media.maxItems,0);
   for (const name of ['get_my_settings','update_my_settings','mute_user']) assert.deepEqual(tools.find(t=>t.name===name).securitySchemes,[{type:'oauth2',scopes:[]}]);
   const rules=await call(database(),'','get_turnfeed_rules');

@@ -10,7 +10,7 @@ import * as net from "node:net";
 import { compactSnippet, boundedLinePreservingSocialTextForTool, socialTextPreviewWouldTruncateForTool, formatTimestampWithUtcForTool, createFeedPresentation, feedCollectionResponseStyleForTool, singleLineSocialIdentityForTool, escapeInlineMarkdownForTool, feedDigestDisplayHeadingForFocus, formatTimestampForTool, formatMarkdownQuoteForTool, friendlyFeedTimestampForTool, feedIdentityForTool, compactFeedActivityForTool, formatCorrectionHistoryForTool, formatThreadReplyItemForTool, markdownLinkDestinationForTool } from "./feed-presentation.mjs";
 import { emptyEventsState, pruneEventsState, eraseEventsOwners, normalizeEventsState, enqueueReplyEvents } from "../vendor/turnfeed/lib/mcp-events-state.mjs";
 import { emptyModerationHistory, validateModerationHistory, moderationHistorySummary, appendModerationDecision } from "./moderation-history.mjs";
-import { emptyWriteReceipts, normalizeWriteReceipts, hasWriteReceipt, writeReceiptCapacityAvailable, rememberWriteReceipt, eraseOwnerWriteReceipts } from "../vendor/turnfeed/lib/public-write-receipts.mjs";
+import { emptyWriteReceipts, normalizeWriteReceipts, hasWriteReceipt, writeReceiptCapacityAvailable, rememberWriteReceipt, eraseOwnerWriteReceipts } from "./public-write-receipts.mjs";
 import { z } from "zod";
 import { Buffer } from 'node:buffer';
 import { nativeAbuseIssue } from './abuse.mjs';

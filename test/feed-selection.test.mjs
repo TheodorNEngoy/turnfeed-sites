@@ -174,7 +174,7 @@ test('a bounded evidence-heavy store fetches feed payloads while leaving unrelat
   const jsonBytes = Buffer.byteLength(JSON.stringify(value));
   assert.ok(jsonBytes > 1_048_576 && jsonBytes < 2 * 1_048_576, `${jsonBytes} fixture bytes`);
   await store(db, value); db.reads.length = 0;
-  await readState(db); const fullBytes = resultBytes(db); db.reads.length = 0;
+  await readState(db, undefined, alice); const fullBytes = resultBytes(db); db.reads.length = 0;
   const batches = db.batchCount, writes = db.executed.length;
   await equivalent(db, value, 'bob', { focus: 'interesting', limit: 4 });
   const selectedBytes = resultBytes(db), ids = fetchedIds(db);
@@ -182,7 +182,7 @@ test('a bounded evidence-heavy store fetches feed payloads while leaving unrelat
   assert.ok(selectedBytes < fullBytes * 0.4, `${selectedBytes} vs ${fullBytes}`);
   assert.ok(ids.includes(recordId(['snapshot', 'posts', ['id', 'post-load-99']])));
   for (const path of [
-    ['snapshot', 'writeReceipts', 'owners', alice], ['snapshot', 'reports', ['id', 'report-0']],
+    ['snapshot', 'reports', ['id', 'report-0']],
     ['snapshot', 'viewerStates', carol], ['snapshot', 'moderationHistory', 'schemaVersion'],
     ['snapshot', 'mcpEvents', 'version'], ['operator', 'revoked', carol],
     ['operator', 'erasures', ['id', 'erasure-1']], ['controls', 'recentRequests', ['key', 'retained-request']],
@@ -192,7 +192,8 @@ test('a bounded evidence-heavy store fetches feed payloads while leaving unrelat
     assert.ok(!ids.includes(id), JSON.stringify(path));
   }
   assert.equal(db.batchCount, batches); assert.equal(db.executed.length, writes);
-  assert.deepEqual((await readState(db)).value, value);
+  assert.ok(db.sql.prepare('SELECT 1 FROM turnfeed_write_receipts WHERE owner = ?').get(alice));
+  assert.deepEqual((await readState(db, undefined, alice)).value, value);
   t.diagnostic(JSON.stringify({ fixtureJsonBytes: jsonBytes, fullReadResultBytes: fullBytes,
     selectedReadResultBytes: selectedBytes, reductionPercent: Number((100 * (1 - selectedBytes / fullBytes)).toFixed(1)), selectedQueries: 2 }));
 });
@@ -230,7 +231,7 @@ test('initial-name fallback preserves evidence, and an explicit name clear remai
   let loaded = await readState(db);
   assert.equal(loaded.value.snapshot.profiles[bob].displayName, 'Bobby Reader');
   assert.equal(loaded.value.retainedEvidence, value.retainedEvidence);
-  assert.deepEqual(loaded.value.snapshot.writeReceipts, value.snapshot.writeReceipts);
+  assert.deepEqual((await readState(db, undefined, alice)).value.snapshot.writeReceipts, value.snapshot.writeReceipts);
   assert.deepEqual(loaded.value.snapshot.reports, value.snapshot.reports);
   loaded.value.snapshot.profiles[bob].displayName = ''; loaded.value.profileNameChoices[bob] = true;
   await store(db, loaded.value);
@@ -250,6 +251,6 @@ test('legacy feed reads keep the complete migration path and preserve unrelated 
   await equivalent(db, value, 'bob', { focus: 'latest', limit: 4 });
   assert.ok(db.reads.some(row => row.query.includes('turnfeed_state_chunks')));
   const loaded = await readState(db);
-  assert.equal(loaded.storageFormat, 2);
+  assert.equal(loaded.storageFormat, 3);
   assert.deepEqual(loaded.value, value);
 });

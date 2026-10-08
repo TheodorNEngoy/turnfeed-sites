@@ -23,6 +23,14 @@ export const stateRecords = sqliteTable('turnfeed_state_records', {
   digest: text('digest').notNull(),
 }, (t) => [primaryKey({ columns: [t.recordId, t.part] })]);
 
+// Append-only replay receipts, loaded for one authenticated owner at a time.
+// Count/digest commitments live in the CAS-protected shared state document.
+export const writeReceipts = sqliteTable('turnfeed_write_receipts', {
+  owner: text('owner').notNull(),
+  part: integer('part').notNull(),
+  value: text('value').notNull(),
+}, (t) => [primaryKey({ columns: [t.owner, t.part] })]);
+
 // File bytes live in R2. Reservations and tombstones stay outside the core snapshot.
 export const photos = sqliteTable('turnfeed_photos', {
   id: text('id').primaryKey(),

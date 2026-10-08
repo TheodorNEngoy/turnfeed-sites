@@ -204,7 +204,7 @@ export async function invoke({ db, origin, secret, subject, displayName = '', na
         continue;
       }
     }
-    const loaded = await readState(db, budget);
+    const loaded = await readState(db, budget, accountKey(subject, secret));
     const previousPhotos = (loaded.value?.snapshot?.posts || []).filter(p => p.media?.length).map(p => ({id:p.id, authorId:p.authorId, media:p.media}));
     const previousAvatar = loaded.value?.snapshot?.profiles?.[accountKey(subject,secret)]?.avatarUrl || '';
     if (subject && loaded.value?.operator?.revoked?.[accountKey(subject, secret)]) {
@@ -214,7 +214,7 @@ export async function invoke({ db, origin, secret, subject, displayName = '', na
       return {status:409,rpcError:{code:-32602,message:'Your profile picture changed. Open My profile again before changing it.'}};
     }
     const core = makeCore({ origin, secret, subject, callerKey,
-      snapshot: loaded.value?.snapshot, controls: loaded.value?.controls, allowedPhotoUrls,
+      snapshot: loaded.value ? { ...loaded.value.snapshot, writeReceipts: loaded.receipts.ledger } : undefined, controls: loaded.value?.controls, allowedPhotoUrls,
       unavailableUserIds: Object.entries(loaded.value?.operator?.revoked || {}).filter(([, value]) => value).map(([id]) => id) });
     const entry = core.tools.get(name);
     if (!entry) return { rpcError: { code: -32601, message: 'Unknown tool' } };

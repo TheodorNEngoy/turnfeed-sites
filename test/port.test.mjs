@@ -11,7 +11,7 @@ installModerationFixture();
 const origin = 'https://turnfeed-native.example';
 const secret = 'local-test-only-012345678901234567890123456789';
 const postText = 'Sharing a practical lesson: keeping the first workflow small makes feedback easier to use.';
-const expectedTools = ['start_turnfeed_chat','open_turnfeed_feed','open_turnfeed_inbox','explain_turnfeed_chat_mode','get_turnfeed_rules','get_feed_digest','get_thread_context','check_reply_before_publishing','set_profile','reset_me','create_post','edit_post','like_post','pin_post','delete_post','publish_public_reply_to_post','publish_public_reply_to_reply','edit_reply','like_reply','delete_reply','report_reply','report_post','follow_user','block_user','get_my_settings','update_my_settings','mute_user','export_my_data','get_my_privacy','set_account_privacy','manage_follower'];
+const expectedTools = ['start_turnfeed_chat','open_turnfeed_feed','open_turnfeed_inbox','explain_turnfeed_chat_mode','get_turnfeed_rules','get_feed_digest','get_thread_context','check_reply_before_publishing','set_profile','reset_me','create_post','edit_post','like_post','pin_post','delete_post','publish_public_reply_to_post','publish_public_reply_to_reply','edit_reply','like_reply','delete_reply','report_reply','report_post','follow_user','block_user','get_my_settings','update_my_settings','mute_user','export_my_data','get_my_privacy','set_account_privacy','manage_follower','get_profile_connections'];
 const call = async (db, subject, name, args = {}) => invoke({ db, subject, name, args, origin, secret, callerKey: subject || 'anonymous' });
 const data = response => response.result?.structuredContent;
 async function profile(db, subject, name) {
@@ -29,7 +29,7 @@ async function rpc(db, name, args, subject, extra = {}) {
   }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, ...extra } }) }), { DB: db, OPENAI_API_KEY: MODERATION_KEY, TURNFEED_SITE_SECRET: secret });
 }
 
-test('retains 24 canonical tools plus seven native settings, export and privacy tools with native annotations', () => {
+test('retains 24 canonical tools plus eight native settings, export, privacy and connection tools with native annotations', () => {
   const core = makeCore({ origin, secret });
   assert.deepEqual([...core.tools.keys()], expectedTools);
   const tools = catalog(core);
@@ -77,9 +77,9 @@ test('ownership checks reject another account editing a post', async () => {
 test('concurrent proposals cannot overwrite the winning revision or delete its chunks', async () => {
   const db = database();
   const first = await readState(db);
-  const initial = { format: 1, snapshot: { version: 19, marker: 'winner' }, controls: {} };
+  const initial = { format: 1, snapshot: { version: 19, writeReceipts: { schemaVersion: 1, owners: {} }, marker: 'winner' }, controls: {} };
   assert.equal(await commitState(db, first.revision, initial), true);
-  assert.equal(await commitState(db, first.revision, { ...initial, snapshot: { version: 19, marker: 'loser' } }), false);
+  assert.equal(await commitState(db, first.revision, { ...initial, snapshot: { version: 19, writeReceipts: { schemaVersion: 1, owners: {} }, marker: 'loser' } }), false);
   assert.equal((await readState(db)).value.snapshot.marker, 'winner');
   const concurrent = database();
   await Promise.all([profile(concurrent, 'alice', 'Alicia'), profile(concurrent, 'bob', 'Bobby')]);
@@ -107,7 +107,7 @@ test('a failed batch rolls back; a lost commit response is never automatically r
 test('corrupt chunks and candidate capacity fail closed without losing stored data', async () => {
   const db = database();
   const state = await readState(db);
-  const value = { format: 1, snapshot: { version: 19, text: '😀'.repeat(20000) }, controls: {} };
+  const value = { format: 1, snapshot: { version: 19, writeReceipts: { schemaVersion: 1, owners: {} }, text: '😀'.repeat(20000) }, controls: {} };
   assert.equal(await commitState(db, state.revision, value), true);
   assert.equal((await readState(db)).value.snapshot.text, value.snapshot.text);
   const saved = await readState(db);

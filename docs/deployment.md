@@ -73,5 +73,7 @@ previews and current database revisions.
 Verify the deployed identity boundary, database writes, photo access and moderation
 with controlled test accounts before accepting real users. Website access and
 native plugin installation/host approval are separate checks. Keep tested backups
-and a compatible rollback plan: format-2 data requires its storage adapter, and
-any rollback must preserve private-account access checks once users enable them.
+and a compatible rollback plan. Apply migration `0004_puzzling_colossus.sql` before
+using the format-3 receipt adapter. Existing state migrates atomically on the next
+successful write. After that write, rollback code must retain format-3 support and
+private-account access checks. A format-2-only Worker cannot read the migrated data.
