@@ -17,7 +17,7 @@ const count = (value, fallback = 0) => Number.isFinite(Number(value)) ? Math.max
 const logo = '<img src="/turnfeed-logo.png" width="40" height="40" alt="" aria-hidden="true">';
 const arrow = `<span aria-hidden="true">↗</span>`;
 const trashIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>';
-const deleteLink = (href, label) => `<a class="delete-action" href="${e(href)}" aria-label="${e(label)}">${trashIcon}<span>Delete</span></a>`;
+const deleteLink = (href, label) => `<a class="delete-action" href="${e(href)}" aria-label="${e(label)}" title="${e(label)}">${trashIcon}</a>`;
 
 function publicHandle(value) {
   const handle = String(value ?? '').replace(/^@/, '');
@@ -411,9 +411,9 @@ button.reaction{white-space:nowrap;overflow-wrap:normal}
 .handle-input>span{position:absolute;left:12px;top:10px;color:#5f6757;font-size:16px}
 .handle-input input{padding-left:30px}
 .form-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:24px;flex-wrap:wrap}
-.delete-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:6px 9px;border-radius:8px;color:#6e7067;font-size:13px;text-decoration:none}
+.delete-action{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;color:#6e7067;text-decoration:none;flex:none}
 .delete-action:hover{color:#a03830;background:#fff0ec}
-.delete-action svg{flex:none}
+.delete-action svg{width:16px;height:16px;flex:none}
 .button-danger svg{vertical-align:middle}
 .delete-confirm{padding:24px;margin-top:18px}
 .delete-confirm p{font-size:15px;color:#666e5b}
@@ -509,6 +509,8 @@ button.reaction{white-space:nowrap;overflow-wrap:normal}
 .composer-bottom .form-help,.signin-card>div{min-width:0;flex:1 1 240px}
 
 .thread-actions a,.site-footer a{padding:8px 0}
+a.delete-action{width:32px;height:32px;min-height:32px;padding:0}
+@media(pointer:coarse){a.delete-action{width:44px;height:44px;min-height:44px}}
 
 .post-text,.thread-post>.post-text{line-height:1.65}
 
