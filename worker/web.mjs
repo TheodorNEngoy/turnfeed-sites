@@ -76,6 +76,16 @@ async function publicProfile(request, env, {handle,ref}) {
   return data;
 }
 
+function profileSelector(url) {
+  const handle=handleValue(query(url,'handle',21)),ref=query(url,'ref',28);
+  if ((!handle && !ref) || (handle && ref) || (handle && !/^[a-z0-9_]{1,20}$/i.test(handle))
+    || (ref && !/^tfr_[A-Za-z0-9_-]{24}$/.test(ref))) throw new WebError('This profile link is invalid.');
+  return {handle,ref};
+}
+function connectionLinks({handle,ref}) {
+  return Object.fromEntries(['followers','following'].map(kind=>[kind,pagePath('/connections',{handle,ref,kind})]));
+}
+
 // This is a browser CSRF token, not evidence of an in-chat approval. Sites
 // identity and the browser's same-origin form submission establish this action.
 function formToken(actor, action, secret, target = null) {
@@ -165,7 +175,7 @@ async function peoplePage(request, env, kind, cursor) {
   return { items: result.relationships || [], count: result.relationshipCount, hasMore: result.hasMore, nextCursor: result.nextCursor };
 }
 export function isWebRoute(path) {
-  return ['/', '/profile', '/person', '/following', '/activity', '/preferences', '/privacy-settings'].includes(path) || /^\/post\/[^/]+(?:\/(?:delete|actions))?$/.test(path)
+  return ['/', '/profile', '/person', '/connections', '/following', '/activity', '/preferences', '/privacy-settings'].includes(path) || /^\/post\/[^/]+(?:\/(?:delete|actions))?$/.test(path)
     || /^\/web\/(post|reply|nested-reply|profile|avatar|avatar-remove|delete|report|block|mute|delete-reply|unblock|unmute|like-post|like-reply|follow|person-block|person-mute|privacy|follower)$/.test(path);
 }
 export function webFailure(error, signedIn = false, draft = '', returnPath = '/') {
@@ -224,14 +234,15 @@ export async function handleWeb(request, env, readBody) {
           statusMessage:done==='saved'?'Your account privacy was saved.':done==='accept'?'Follow request approved.':done==='reject'?'Follow request declined.':done==='remove'?'Follower removed.':''});
       }
       if (url.pathname === '/person') {
-        const handle=handleValue(query(url,'handle',21)),ref=query(url,'ref',28);
-        if ((!handle && !ref) || (handle && ref) || (handle && !/^[a-z0-9_]{1,20}$/i.test(handle))
-          || (ref && !/^tfr_[A-Za-z0-9_-]{24}$/.test(ref))) throw new WebError('This profile link is invalid.');
+        const {handle,ref}=profileSelector(url);
         if (ref && !signedIn) return redirect(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnPath)}`);
         const data=await publicProfile(request,env,{handle,ref});
         if (data.profile.viewerIsSelf) return redirect('/profile');
         const destination=profilePath(data.profile,signedIn) || pagePath('/person',{handle,ref});
         data.profile.webProfileUrl=destination;
+        if (!data.profile.privateAccount && !data.profile.viewerHasBlocked && data.profile.viewerCanReadContent !== false) {
+          data.profile.webConnections=connectionLinks({handle,ref});
+        }
         data.profile.webFollow=followControl(data.profile,actor,env.TURNFEED_SITE_SECRET,destination);
         if (actor && !data.profile.viewerHasBlocked && data.profile.targetRef) {
           data.profile.webPeopleActions=['mute','block'].map(action=>({action,token:formToken(actor,'person-'+action,env.TURNFEED_SITE_SECRET,{person:personIdentity(data.profile)})}));
@@ -239,6 +250,17 @@ export async function handleWeb(request, env, readBody) {
         socialItems(data,actor,env.TURNFEED_SITE_SECRET,destination);
         return html({kind:'public-profile',signedIn,data,returnPath:destination,
           statusMessage:query(url,'done',20)==='followed'?(data.profile.viewerHasRequested?'Your follow request is pending.':'You are now following this person.'):query(url,'done',20)==='unfollowed'?'You are no longer following or requesting to follow this person.':''});
+      }
+      if (url.pathname === '/connections') {
+        const {handle,ref}=profileSelector(url),kind=query(url,'kind',10) || 'followers',cursor=query(url,'cursor',256);
+        if (!['followers','following'].includes(kind)) throw new WebError('Choose Followers or Following.');
+        if (ref && !signedIn) return redirect(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnPath)}`);
+        const data=await call(request,env,'get_profile_connections',{...(handle?{profileHandle:handle}:{targetRef:ref}),kind,limit:20,...(cursor?{cursor}:{})});
+        data.items=(data.items || []).map(item=>({...item,webProfileUrl:profilePath(item,signedIn)}));
+        data.webProfileUrl=profilePath(data.profile,signedIn) || pagePath('/person',{handle,ref});
+        data.webConnections=connectionLinks({handle,ref});
+        data.nextUrl=data.hasMore?pagePath('/connections',{handle,ref,kind,cursor:data.nextCursor}):'';
+        return html({kind:'connections',signedIn,data,returnPath});
       }
       if (url.pathname === '/following') {
         if (!signedIn) return redirect(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnPath)}`);

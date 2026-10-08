@@ -34,6 +34,8 @@ server.listen(0, '127.0.0.1', async () => {
   const call = async (subject, name, args) => (await invoke({ db, subject, name, args, origin: workerOrigin, secret, callerKey: subject })).result.structuredContent;
   await call('preview-avery', 'set_profile', { displayName: 'Avery Lane', handle: 'averylane', bio: 'Small discoveries, good books and everyday ideas.', visibility: 'public' });
   await call('preview-maya', 'set_profile', { displayName: 'Maya Chen', handle: 'mayachen', bio: 'Reading, walking, making things.', visibility: 'public' });
+  await call('preview-avery', 'follow_user', { handle: 'mayachen', targetLabel: 'Maya Chen', action: 'follow' });
+  await call('preview-maya', 'follow_user', { handle: 'averylane', targetLabel: 'Avery Lane', action: 'follow' });
   const book = await call('preview-maya', 'create_post', { text: 'What is a book you would happily read twice?\n\nLooking for something that feels different the second time around.', visibility: 'public', clientId: 'preview-book' });
   await call('preview-avery', 'publish_public_reply_to_post', { ...book.replyHandoff.targetArguments, text: 'A Wizard of Earthsea. Short enough for a weekend, with plenty to think about afterwards.', visibility: 'public', clientId: 'preview-book-reply' });
   const walk = await call('preview-avery', 'create_post', { text: 'A small thing that made today better: leaving my phone at home for a walk. What has worked for you lately?', visibility: 'public', clientId: 'preview-walk' });

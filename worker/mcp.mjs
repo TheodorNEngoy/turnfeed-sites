@@ -8,24 +8,25 @@ import { readSelection } from './storage-selection.mjs';
 import { accountKey, chatGPTDisplayName, SITES_ISSUER } from './identity.mjs';
 import { registerNativePreferences, privateSettingsPage } from './native-preferences.mjs';
 import { registerNativePrivacy } from './native-privacy.mjs';
+import { registerNativeProfileConnections } from './native-profile-connections.mjs';
 import { registerNativeAccount, invokeNativeAccount, disabledAccountAction } from './native-account.mjs';
 import { createModerator, publicTextProjection, changedPublicTexts, ModerationError } from './moderation.mjs';
 import { reserveModerationAttempt } from './moderation-limit.mjs';
 
 const PUBLIC_TOOLS = new Set(['start_turnfeed_chat', 'explain_turnfeed_chat_mode', 'get_turnfeed_rules',
-  'get_feed_digest', 'get_thread_context', 'open_turnfeed_feed']);
+  'get_feed_digest', 'get_thread_context', 'open_turnfeed_feed', 'get_profile_connections']);
 const SUPPORTED_PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const issuer = SITES_ISSUER;
 const config = { TURNFEED_AGGREGATE_ACTIVATION_ENABLED: '0' };
 const photoInput = z.object({ download_url: z.string().min(1).max(8192), file_id: z.string().min(1).max(256), mime_type: z.string().max(100).optional(), file_name: z.string().max(256).optional() }).strict();
 const stateDigest = (snapshot, controls, profileNameChoices) => createHash('sha256')
   .update(JSON.stringify({ snapshot: { ...snapshot, updatedAt: null }, controls, profileNameChoices })).digest('hex');
-export function makeCore({ origin, secret, subject = '', snapshot, controls, callerKey = '', threadProjection = false, allowedPhotoUrls = [] }) {
-  const core = createTurnfeedCore({ origin, secret, issuer, snapshot, controls, config, callerKey, threadProjection, allowedPhotoUrls });
+export function makeCore({ origin, secret, subject = '', snapshot, controls, callerKey = '', threadProjection = false, allowedPhotoUrls = [], unavailableUserIds = [] }) {
+  const core = createTurnfeedCore({ origin, secret, issuer, snapshot, controls, config, callerKey, threadProjection, allowedPhotoUrls, unavailableUserIds });
   core.instructions += ' Native Turnfeed also provides get_my_settings, update_my_settings and mute_user for private preferences in chat. Only change those preferences when the user asks. To publish a user-selected JPEG or PNG photo from chat, use create_post with its photo file input and the exact approved caption. Photos are limited to 1 MiB each; URLs alone are not uploaded. Video links from YouTube and Vimeo display on the website after the viewer chooses to load them. Video-file uploads, remote link previews and MCP Events delivery remain unavailable. ChatGPT may supply an initial account name; it can differ from the public ChatGPT profile name and users may change or clear it.';
   core.instructions += ' Use export_my_data for a private account export. Closing a Turnfeed account in chat is temporarily unavailable; direct closure requests to support@turnfeedapp.com. Never substitute reset_me for account closure. Exports stay private.';
   core.instructions += ' Account privacy applies to every post, reply and photo. Private-account content is readable only by its author and approved followers who can also read the conversation. Use get_my_privacy to check privacy and follow requests; change it only when asked. Names and handles remain discoverable. Never describe a private account’s publication as visible to everyone.';
-  return registerNativePrivacy(registerNativeAccount(registerNativePreferences(core, secret)), secret);
+  return registerNativeProfileConnections(registerNativePrivacy(registerNativeAccount(registerNativePreferences(core, secret)), secret), secret);
 }
 
 function jsonSchema(schema) {
@@ -213,13 +214,19 @@ export async function invoke({ db, origin, secret, subject, displayName = '', na
       return {status:409,rpcError:{code:-32602,message:'Your profile picture changed. Open My profile again before changing it.'}};
     }
     const core = makeCore({ origin, secret, subject, callerKey,
-      snapshot: loaded.value?.snapshot, controls: loaded.value?.controls, allowedPhotoUrls });
+      snapshot: loaded.value?.snapshot, controls: loaded.value?.controls, allowedPhotoUrls,
+      unavailableUserIds: Object.entries(loaded.value?.operator?.revoked || {}).filter(([, value]) => value).map(([id]) => id) });
     const entry = core.tools.get(name);
     if (!entry) return { rpcError: { code: -32601, message: 'Unknown tool' } };
     const schema = entry.descriptor.inputSchema;
     const parsed = schema.safeParse(args);
     if (!parsed.success) return { rpcError: { code: -32602, message: 'Invalid tool arguments', data: parsed.error.issues.map(i => ({ path: i.path, message: i.message })) } };
     if (entry.nativeAccount) return invokeNativeAccount({ loaded, core, secret, subject, name, args: parsed.data });
+    // A connection-list read must never import a profile name or write state.
+    if (name === 'get_profile_connections') {
+      if (parsed.data.targetRef && !subject) return { status: 401, rpcError: { code: -32001, message: 'Sign in with ChatGPT to use this profile reference.' } };
+      return { result: await entry.handler(parsed.data, trustedContext(subject)) };
+    }
     const profileNameChoices = { ...loaded.value?.profileNameChoices };
     const userId = accountKey(subject, secret);
     const before = stateDigest(core.snapshot(), core.controls(), profileNameChoices);

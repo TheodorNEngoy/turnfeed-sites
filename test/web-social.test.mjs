@@ -140,6 +140,61 @@ test('public profiles follow and unfollow through native state while keeping own
   assert.equal(anonymous.status,200);assert.equal(tokens(anonymous,'follow').length,0);assert.match(anonymous.body,/Sign in to follow/);
 });
 
+test('public profile counts open the correct follower and following lists, including signed-out readers',async t=>{
+  const f=await fixture(t);
+  await f.rpc('carol','set_profile',{displayName:'Carol',handle:'carol',visibility:'public'});
+  await f.rpc('bob','follow_user',{handle:'alice',targetLabel:'Alice',action:'follow'});
+  await f.rpc('alice','follow_user',{handle:'carol',targetLabel:'Carol',action:'follow'});
+  for(const subject of ['bob','']) {
+    const page=await f.web('/person?handle=alice',{subject});
+    assert.match(page.body,/href="\/connections\?handle=alice&amp;kind=followers"/);
+    assert.match(page.body,/href="\/connections\?handle=alice&amp;kind=following"/);
+    assert.match(page.body,/data-follower-count[^>]*>1<\/a>/);
+    const followers=await f.web('/connections?handle=alice&kind=followers',{subject});
+    assert.equal(followers.status,200,followers.body);
+    assert.match(followers.body,/>Bob<\/a>/);assert.doesNotMatch(followers.body,/>Carol<\/a>/);
+    const following=await f.web('/connections?handle=alice&kind=following',{subject});
+    assert.equal(following.status,200,following.body);
+    assert.match(following.body,/href="\/person\?handle=carol"/);
+    assert.doesNotMatch(following.body,/>Bob<\/a>/);
+  }
+  await f.rpc('alice','set_account_privacy',{privateAccount:true});
+  // Even an existing approved follower must not gain a new private graph view.
+  assert.doesNotMatch((await f.web('/person?handle=alice')).body,/href="\/connections/);
+  for(const subject of ['bob',''])assert.ok((await f.web('/connections?handle=alice&kind=followers',{subject})).status>=400);
+});
+
+test('profile people links validate targets and preserve viewer-bound references',async t=>{
+  const f=await fixture(t,{handle:false});
+  const page=await f.web(f.path);
+  const person=unescape(page.body.match(/href="(\/person\?ref=tfr_[A-Za-z0-9_-]+)"/)?.[1] || '');assert.ok(person);
+  const profile=await f.web(person);
+  const list=unescape(profile.body.match(/href="(\/connections\?ref=[^"]+&amp;kind=followers)"/)?.[1] || '');assert.ok(list);
+  assert.equal((await f.web(list)).status,200);
+  assert.ok((await f.web(list,{subject:'carol'})).status>=400);
+  assert.match((await f.web(list,{subject:''})).location,/signin-with-chatgpt/);
+  for(const path of ['/connections','/connections?handle=alice&handle=bob','/connections?handle=alice&ref=tfr_fake','/connections?handle=alice&kind=blocked'])assert.equal((await f.web(path)).status,400);
+});
+
+test('public people pages paginate without leaking hidden relationships or reusing another list cursor',async t=>{
+  const f=await fixture(t);
+  for(let i=0;i<21;i++) {
+    const handle=`member_${i}`,displayName=`Member ${i}`;
+    await f.rpc(handle,'set_profile',{displayName,handle,visibility:'public'});
+    await f.rpc(handle,'follow_user',{handle:'alice',targetLabel:'Alice',action:'follow'});
+  }
+  const first=await f.web('/connections?handle=alice&kind=followers');
+  assert.equal(first.status,200,first.body);assert.equal((first.body.match(/class="connection-person"/g)||[]).length,20);
+  const href=unescape(first.body.match(/href="(\/connections\?[^\"]+cursor=[^\"]+)"/)?.[1] || '');assert.ok(href);
+  const second=await f.web(href);assert.equal(second.status,200,second.body);assert.equal((second.body.match(/class="connection-person"/g)||[]).length,1);
+  assert.ok((await f.web(href.replace('kind=followers','kind=following'))).status>=400);
+  assert.ok((await f.web(href,{subject:''})).status>=400);
+  await f.rpc('member_0','set_account_privacy',{privateAccount:true});
+  assert.ok((await f.web(href)).status>=400);
+  const refreshed=await f.web('/connections?handle=alice&kind=followers');
+  assert.doesNotMatch(refreshed.body,/href="\/person\?handle=member_0"/);
+});
+
 test('handle-less profiles use viewer-bound references and follow tokens reject changed identities and blocks',async t=>{
   const f=await fixture(t,{handle:false}),page=await f.web(f.path);
   const href=unescape(page.body.match(/href="(\/person\?ref=tfr_[A-Za-z0-9_-]+)"/)?.[1] || '');
