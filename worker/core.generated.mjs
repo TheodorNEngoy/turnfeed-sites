@@ -14,6 +14,7 @@ import { emptyWriteReceipts, normalizeWriteReceipts, hasWriteReceipt, writeRecei
 import { z } from "zod";
 import { Buffer } from 'node:buffer';
 import { nativeAbuseIssue } from './abuse.mjs';
+import { MAX_POST_TEXT_LENGTH, MAX_REPLY_TEXT_LENGTH } from './text-limits.mjs';
 export function createTurnfeedCore(runtime) {
   const process = { env: runtime.config || {}, stderr: { write() {} } };
   const tools = new Map();
@@ -3475,9 +3476,9 @@ function actionSyncExtraForUserId(userId, extra = {}) {
   };
 }
 
-const MAX_POST_CHARS = 600;
+const MAX_POST_CHARS = MAX_POST_TEXT_LENGTH;
 
-const MAX_REPLY_CHARS = 600;
+const MAX_REPLY_CHARS = MAX_REPLY_TEXT_LENGTH;
 
 const MIN_CORRECTION_REASON_CHARS = 4;
 
@@ -3751,7 +3752,7 @@ const THREAD_CONTEXT_REPLY_LIMIT = 6;
 
 const THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES = 15_500;
 
-const THREAD_HANDOFF_SELECTOR_MAX_CHARS = Math.max(MAX_POST_CHARS, MAX_REPLY_CHARS);
+const THREAD_HANDOFF_SELECTOR_MAX_CHARS = 700;
 
 const AMBIGUOUS_TARGET_CANDIDATE_LIMIT = 4;
 
@@ -8075,7 +8076,7 @@ function buildFeedDigestForTool(viewerUserId, { limit, focus, activityWindow, ti
   }
   const fullItems = contextualizeFeedItemsForTool(pageResult.page.map((post) => (
     postContextPreviewForTool(post, viewerUserId, relationshipCache, {
-      textLimit: MAX_POST_CHARS,
+      textLimit: Math.min(MAX_POST_CHARS, 600),
       preserveDisplayLineBreaks: true,
     })
   )));
@@ -8136,7 +8137,7 @@ function buildFeedSearchDigestForTool(viewerUserId, rawQuery, { limit, cursor, a
   const page = resultPage.page;
   const fullItems = contextualizeFeedItemsForTool(page.map((post) => {
     const preview = postContextPreviewForTool(post, viewerUserId, relationshipCache, {
-      textLimit: MAX_POST_CHARS,
+      textLimit: Math.min(MAX_POST_CHARS, 600),
       preserveDisplayLineBreaks: true,
     });
     if (!feedPreviewVisiblyMatchesSearch(preview, query)) {
@@ -8176,7 +8177,7 @@ function buildOwnPostsContextForTool(viewerUserId, { query = "", allRequested = 
   });
   const fullItems = contextualizeFeedItemsForTool(pageResult.page.map((post) => (
     postContextPreviewForTool(post, viewerUserId, relationshipCache, {
-      textLimit: MAX_POST_CHARS,
+      textLimit: Math.min(MAX_POST_CHARS, 600),
       preserveDisplayLineBreaks: true,
     })
   )));
@@ -8234,7 +8235,7 @@ function buildProfileContextForTool(viewerUserId, { profileUserId = "", profileH
   ].slice(0, parseContextDigestLimit(limit));
   const relationshipCache = createRelationshipScoringCache(viewerUserId);
   const fullItems = contextualizeFeedItemsForTool(orderedPosts.map((post) => postContextPreviewForTool(post, viewerUserId, relationshipCache, {
-    textLimit: MAX_POST_CHARS,
+    textLimit: Math.min(MAX_POST_CHARS, 600),
     preserveDisplayLineBreaks: true,
   })));
   const nowMs = Date.now();
@@ -8536,13 +8537,19 @@ function buildThreadContextForTool(viewerUserId, postId, { limit, cursor } = {})
     };
   };
 
+  const longPostCharacters = [thread.text, thread.quote?.text]
+    .reduce((total, value) => total + Math.max(0, String(value || '').length - 600), 0);
+  const historyCharacters = history => (history || []).reduce((total, entry) => total + String(entry.text || '').length + String(entry.reason || '').length + 128, 0);
+  const completeHistoryCharacters = historyCharacters(thread.correctionHistory)
+    + Math.max(0, ...candidateDisplayReplies.map(reply => historyCharacters(reply.correctionHistory)));
+  const threadContextBudget = THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES + (longPostCharacters + completeHistoryCharacters) * 6 + (longPostCharacters ? 1200 : 0);
   let retainedReplies = candidateDisplayReplies;
   let result = buildResult(retainedReplies);
   // Full stored bodies are authoritative. If the transport envelope would be
   // too large, return fewer complete reply rows and continue from that row.
   while (
     retainedReplies.length > 1
-    && threadContextToolResultByteLength(result) >= THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES
+    && threadContextToolResultByteLength(result) >= threadContextBudget
   ) {
     retainedReplies = retainedReplies.slice(0, -1);
     result = buildResult(retainedReplies);
@@ -8550,7 +8557,7 @@ function buildThreadContextForTool(viewerUserId, postId, { limit, cursor } = {})
   // The rendered message already carries every attachment URL. Under extreme
   // payload pressure, omit only duplicate structured media previews while
   // preserving mediaCount, full social text, and exact reply handoffs.
-  if (threadContextToolResultByteLength(result) >= THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES) {
+  if (threadContextToolResultByteLength(result) >= threadContextBudget) {
     result = {
       ...result,
       thread: {
@@ -8562,21 +8569,21 @@ function buildThreadContextForTool(viewerUserId, postId, { limit, cursor } = {})
       },
     };
   }
-  if (threadContextToolResultByteLength(result) >= THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES) {
+  if (threadContextToolResultByteLength(result) >= threadContextBudget) {
     // A complete root, quoted post, attachments and one reply can already fill
     // the envelope. Omit only the optional duplicate rendering in that case;
     // the original MCP text and every stored body remain authoritative.
     const { displayText: _displayText, ...withoutDisplayText } = result;
     result = withoutDisplayText;
   }
-  if (threadContextToolResultByteLength(result) >= THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES) {
+  if (threadContextToolResultByteLength(result) >= threadContextBudget) {
     // This optional guidance repeats the tool description and server rules.
     // Drop it before rejecting a complete Unicode body; retain the original
     // rendering, untrusted-content boundaries, exact handoffs and byte limit.
     const { defaultResponseStyle: _style, ...withoutStyle } = result;
     result = withoutStyle;
   }
-  if (threadContextToolResultByteLength(result) >= THREAD_CONTEXT_TOOL_RESULT_MAX_BYTES) {
+  if (threadContextToolResultByteLength(result) >= threadContextBudget) {
     throw new Error("Thread context exceeded the safe transport budget after preview compaction.");
   }
   return result;
@@ -15281,6 +15288,7 @@ function handleCreatePost({
   requireReadableQuoteTarget = false,
   extraRateLimitResult = null,
 }) {
+  if (String(text ?? "").length > MAX_POST_CHARS) return { ok: false, message: `Keep post text within ${MAX_POST_CHARS} characters.` };
   const cleanText = String(text ?? "").trim();
   if (!cleanText) return { ok: false, message: "Missing post text." };
   const cleanClientId = typeof clientId === "string" ? clientId.trim().slice(0, MAX_CLIENT_ID_CHARS) : "";
@@ -15589,9 +15597,10 @@ function handleEditPost({
     if (readableTargetIssue) return { ok: false, message: readableTargetIssue };
   }
 
+  if (String(text ?? "").length > MAX_POST_CHARS) return { ok: false, message: `Keep post text within ${MAX_POST_CHARS} characters.` };
   const cleanText = String(text ?? "").trim();
   if (!cleanText) return { ok: false, message: "Missing post text." };
-  const nextText = cleanText.slice(0, MAX_POST_CHARS);
+  const nextText = cleanText;
   if (post.authorId !== userId) {
     return {
       ok: false,
@@ -16713,7 +16722,8 @@ function handleReplyToPost({
 }) {
   const cleanPostId = String(postId ?? "").trim();
   const cleanTargetLabel = compactSnippet(targetLabel || "", 240);
-  const cleanText = String(text ?? "").trim().slice(0, MAX_REPLY_CHARS);
+  if (String(text ?? "").length > MAX_REPLY_CHARS) return { ok: false, message: `Keep reply text within ${MAX_REPLY_CHARS} characters.` };
+  const cleanText = String(text ?? "").trim();
   const cleanClientId = typeof clientId === "string" ? clientId.trim().slice(0, MAX_CLIENT_ID_CHARS) : "";
   if (!cleanText) return { ok: false, message: "Missing reply text.", postId: cleanPostId };
   if (cleanClientId) {
@@ -16904,7 +16914,8 @@ function handleReplyToReply({
 }) {
   const cleanReplyId = String(replyId ?? "").trim();
   const cleanTargetLabel = compactSnippet(targetLabel || "", 240);
-  const cleanText = String(text ?? "").trim().slice(0, MAX_REPLY_CHARS);
+  if (String(text ?? "").length > MAX_REPLY_CHARS) return { ok: false, message: `Keep reply text within ${MAX_REPLY_CHARS} characters.` };
+  const cleanText = String(text ?? "").trim();
   const cleanClientId = typeof clientId === "string" ? clientId.trim().slice(0, MAX_CLIENT_ID_CHARS) : "";
   if (!cleanText) return { ok: false, message: "Missing reply text." };
   if (cleanClientId) {
@@ -17121,7 +17132,8 @@ function handleEditReply({
   const replyId = String(id ?? "").trim();
   const cleanTargetLabel = compactSnippet(targetLabel || "", 240);
 
-  const cleanText = String(text ?? "").trim().slice(0, MAX_REPLY_CHARS);
+  if (String(text ?? "").length > MAX_REPLY_CHARS) return { ok: false, message: `Keep reply text within ${MAX_REPLY_CHARS} characters.` };
+  const cleanText = String(text ?? "").trim();
   if (!cleanText) return { ok: false, message: "Missing reply text." };
 
   const loc = replyId

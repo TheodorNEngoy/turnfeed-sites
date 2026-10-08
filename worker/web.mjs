@@ -7,6 +7,8 @@ import { renderWeb } from './web-view.mjs';
 import { activityPayload } from './activity.mjs';
 import { readPhotoForm, webPhotoInput } from './web-photo.mjs';
 import { PhotoError } from './photos.mjs';
+import { MAX_POST_TEXT_LENGTH, MAX_REPLY_TEXT_LENGTH } from './text-limits.mjs';
+import { compactSnippet } from './feed-presentation.mjs';
 
 const LIFETIME = 30 * 60_000;
 const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
@@ -159,9 +161,9 @@ async function controlTarget(request, env, postId, reply, cursor) {
 function readableTarget(data) {
   const { item, isReply } = data;
   return { targetLabel: `${isReply ? 'Reply' : 'Post'} by ${item.authorName}`.slice(0, 240),
-    ...(isReply ? { replyText: item.text, parentPostText: data.parentText,
+    ...(isReply ? { replyText: item.text, parentPostText: compactSnippet(data.parentText, 700),
       ...(item.authorPublicHandle ? { replyAuthorHandle: item.authorPublicHandle } : {}) }
-      : { postId: data.postId, postText: item.text,
+      : { postId: data.postId, postText: compactSnippet(item.text, 700),
         ...(item.authorPublicHandle ? { authorHandle: item.authorPublicHandle } : {}) }),
     ...(item.createdAt ? { createdAt: item.createdAt } : {}) };
 }
@@ -186,7 +188,7 @@ export function webFailure(error, signedIn = false, draft = '', returnPath = '/'
   else if (error instanceof StorageError) {
     if (error.code === 'storage_outcome_unknown') message = 'The connection was interrupted while saving. Your action may have completed. Check the feed before trying again; do not publish a second copy.';
     else if (error.code === 'candidate_capacity_reached') message = 'This Turnfeed preview has reached its storage limit. Your change was not saved. Contact support.';
-    else if (error.code === 'request_too_large') { message = 'This form is too large. Posts and replies can contain up to 600 characters.'; status = 413; }
+    else if (error.code === 'request_too_large') { message = `This form is too large. Posts can contain up to ${MAX_POST_TEXT_LENGTH} characters and replies up to ${MAX_REPLY_TEXT_LENGTH}.`; status = 413; }
   }
   return html({ kind: 'error', signedIn, error: message, draft, returnPath }, status);
 }
@@ -376,7 +378,9 @@ export async function handleWeb(request, env, readBody) {
       : ['delete', 'block', 'mute', 'delete-reply', 'unblock', 'unmute', 'like-post', 'like-reply', 'follow', 'person-block', 'person-mute'].includes(action) ? ['token'] : action==='post' && multipart ? ['token','text','photo'] : ['token', 'text'];
     for (const key of form.keys()) if (!allowed.includes(key) || form.getAll(key).length !== 1) throw new WebError('The form contains invalid fields. Open a fresh page.');
     for (const [key,value] of form.entries()) if (key!=='photo' && typeof value!=='string') throw new WebError('The form contains invalid fields. Open a fresh page.');
-    draft = (form.get('text') || '').slice(0, 600);
+    // The request body is already bounded. Preserve rejected text in recovery,
+    // including an over-limit draft, so validation never discards the tail.
+    draft = form.get('text') || '';
     const token = readToken(form.get('token'), actor, action === 'avatar-remove' ? 'avatar' : action, env.TURNFEED_SITE_SECRET);
     if (action==='privacy') {
       if (!['true','false'].includes(form.get('privateAccount')) || typeof token.target?.privateAccount!=='boolean') throw new WebError('Choose Public or Private from a fresh account privacy page.');
@@ -464,7 +468,8 @@ export async function handleWeb(request, env, readBody) {
     }
     if (action === 'post' || action === 'reply' || action === 'nested-reply') {
       const text = form.get('text');
-      if (!text?.trim() || text.length > 600) throw new WebError('Write between 1 and 600 characters.');
+      const maxTextLength = action === 'post' ? MAX_POST_TEXT_LENGTH : MAX_REPLY_TEXT_LENGTH;
+      if (!text?.trim() || text.length > maxTextLength) throw new WebError(`Write between 1 and ${maxTextLength} characters.`);
       if (action === 'post') {
         const photo = multipart ? await webPhotoInput(form.get('photo')) : undefined;
         const data = await call(request, env, 'create_post', { text, visibility: 'public', clientId: token.clientId }, false, photo);
@@ -544,7 +549,7 @@ export async function handleWeb(request, env, readBody) {
       // Deleting a thread also removes replies; both confirmation views make
       // that scope explicit. Never accept bulk-deletion fields from a form.
       await call(request, env, 'delete_post', { id: data.postId, targetLabel: `Post by ${data.thread.authorName}`,
-        postText: data.thread.text, ...(data.thread.authorPublicHandle ? { authorHandle: data.thread.authorPublicHandle } : {}),
+        postText: compactSnippet(data.thread.text, 700), ...(data.thread.authorPublicHandle ? { authorHandle: data.thread.authorPublicHandle } : {}),
         ...(data.thread.createdAt ? { createdAt: data.thread.createdAt } : {}), scope: 'one_post' });
       if (request.headers.get('accept') === 'application/json') return Response.json({ ok: true, deleted: 'post', postId: data.postId }, { headers });
       return redirect('/?done=deleted');

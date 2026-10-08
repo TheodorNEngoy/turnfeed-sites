@@ -93,3 +93,7 @@ The retained `follows` map contains only approved edges. Pending requests with u
 `get_my_privacy`, `set_account_privacy` and `manage_follower` provide the same controls to the native candidate. Lists use bounded pages and account/state-bound cursors. The retained tool parameter `visibility: "public"` is a compatibility acknowledgement; it never overrides account privacy. Both complete and selective readers enforce private-author access. Direct avatar/photo URLs enforce current access and use no-store responses. Ordinary export context/report receipts are redacted when current target access cannot be established; operator evidence stays separately authorized.
 
 Privacy changes are covered by isolated multi-account tests. Hosted identity provenance and hosted D1 atomicity remain platform assumptions; local checks do not independently certify those boundaries. Never roll back to a build without account-privacy enforcement once any account has opted into private mode.
+
+## Text length and feed previews
+
+Posts support 3,000 characters; replies and nested replies support 600. Limits use UTF-16 units, matching browser `maxlength`. Over-limit writes are rejected without shortening submitted text. Feed rows retain bounded previews with a Read more link; conversation pages preserve the full post. Signed action fingerprints still bind complete stored content, while readable MCP selectors use bounded excerpts.

@@ -5,8 +5,9 @@ posts and threaded replies, profiles, photos, likes, following, private accounts
 notification activity, reports and operator moderation. Website and native tools
 share the same handlers and data.
 
-This repository tracks native Turnfeed updates through Site version 44,
-including the receipt-storage change from native commit `267ceac`.
+This repository tracks native Turnfeed updates through Site version 45,
+including 3,000-character posts and compact feed previews from native commit `48755ce`.
+Replies remain limited to 600 characters.
 Hosting uses ChatGPT Sites identity, D1 storage and private R2 photo storage.
 The included local preview works with synthetic users and disposable storage.
 Public plugin distribution and host-specific behavior require separate verification.
