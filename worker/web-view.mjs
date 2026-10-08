@@ -121,9 +121,13 @@ function emptyFeed(signedIn, profile = false) {
   return `<section class="card empty"><div class="empty-mark" aria-hidden="true">${logo}</div><h2>${profile ? 'Your story starts here' : 'A little quiet, for now'}</h2><p>${profile ? 'Your posts will appear here. Share a thought with the feed to start a conversation.' : signedIn ? 'A thought, a question, something worth sharing. Your post can start the first conversation.' : 'There are no posts to read yet. Sign in with ChatGPT to start a conversation.'}</p>${profile ? '<a class="text-link" href="/">Go to the feed <span aria-hidden="true">→</span></a>' : ''}</section>`;
 }
 
+function codexHint() {
+  return `<details class="codex-hint"><summary>Use Turnfeed alongside Codex</summary><p>Ask Codex: <span class="codex-prompt">“Open ${e(siteOrigin)}/ in the sidebar.”</span></p><p>Then sign in with ChatGPT. Discuss posts privately in your Codex chat, and ask Codex to help write a reply. Review it, then ask Codex to publish it.</p></details>`;
+}
+
 function feedView({ data, signedIn, formToken, draft, focus, returnPath }) {
   const items = list(data.items);
-  return `<header class="page-heading"><h1>Shared feed<span class="heading-dot">.</span></h1><p>${signedIn ? 'Conversations you can read.' : 'A social feed. Sign in with ChatGPT to join in.'}</p></header>${signedIn ? composerEntry({ formToken, draft }, 'Create a post') : signInCard({ returnPath })}<div class="feed-heading"><nav class="tabs" aria-label="Feed order"><a href="/?focus=active"${focus === 'active' ? ' aria-current="page"' : ''}>Active</a><a href="/?focus=latest"${focus === 'latest' ? ' aria-current="page"' : ''}>Latest</a></nav></div><section class="feed" data-scroll-feed data-feed-viewer="${e(data.webFeedViewer)}" aria-label="Conversations">${items.length ? items.map(postCard).join('') : emptyFeed(signedIn)}</section>${pagination(data, { focus })}`;
+  return `<header class="page-heading"><h1>Shared feed<span class="heading-dot">.</span></h1><p>${signedIn ? 'Conversations you can read.' : 'A social feed. Sign in with ChatGPT to join in.'}</p></header>${codexHint()}${signedIn ? composerEntry({ formToken, draft }, 'Create a post') : signInCard({ returnPath })}<div class="feed-heading"><nav class="tabs" aria-label="Feed order"><a href="/?focus=active"${focus === 'active' ? ' aria-current="page"' : ''}>Active</a><a href="/?focus=latest"${focus === 'latest' ? ' aria-current="page"' : ''}>Latest</a></nav></div><section class="feed" data-scroll-feed data-feed-viewer="${e(data.webFeedViewer)}" aria-label="Conversations">${items.length ? items.map(postCard).join('') : emptyFeed(signedIn)}</section>${pagination(data, { focus })}`;
 }
 
 function threadView({ data, signedIn, formToken, draft, returnPath }) {
@@ -259,6 +263,10 @@ main{min-width:0}
 .page-heading>p{color:#666b5e;font-size:16px;margin-top:11px}
 .page-heading.compact{margin:12px 0 18px}
 .page-heading.compact h1{font-size:32px}
+.codex-hint{margin:-12px 0 20px;border:1px solid var(--line);border-radius:12px;background:#eef0e8;color:var(--muted);font-size:14px}
+.codex-hint>summary{cursor:pointer;min-height:44px;padding:10px 14px;color:#45503b;font-weight:600;overflow-wrap:anywhere}
+.codex-hint p{margin:0 14px 12px;overflow-wrap:anywhere}
+.codex-prompt{display:block;margin-top:5px;color:var(--ink)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 5px #26301503}
 .composer{padding:22px 24px;margin-bottom:28px}
 .composer-label{display:block;font-weight:650;font-size:16px;letter-spacing:-.2px;margin-bottom:13px}
