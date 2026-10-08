@@ -312,6 +312,12 @@ export async function handleWeb(request, env, readBody) {
         const reply = query(url, 'reply', 64);
         if (reply && !/^[a-f0-9]{64}$/.test(reply)) throw new WebError('This reply link is invalid.');
         const data = await controlTarget(request, env, id, reply, cursor);
+        if (request.headers.get('accept') === 'application/json') {
+          if (!data.isReply || !data.viewerOwnsTarget) throw new WebError('Only the author can delete this reply.', 403);
+          return Response.json({ ok: true, kind: 'reply', postId: data.postId,
+            authorName: data.item.authorName, text: data.item.text,
+            token: formToken(actor, 'delete-reply', env.TURNFEED_SITE_SECRET, data.target), action: '/web/delete-reply' }, { headers });
+        }
         const actions = [];
         const add = (action, label, description) => actions.push({ action, label, description,
           token: formToken(actor, action, env.TURNFEED_SITE_SECRET, data.target) });
@@ -330,6 +336,11 @@ export async function handleWeb(request, env, readBody) {
       const data = await thread(request, env, id, cursor);
       const deleting = match[2] === '/delete';
       if (deleting && (!signedIn || !data.viewerOwnsTarget)) throw new WebError('Only the author can delete this post.', 403);
+      if (deleting && request.headers.get('accept') === 'application/json') {
+        return Response.json({ ok: true, kind: 'post', postId: data.postId,
+          authorName: data.thread.authorName, text: data.thread.text,
+          token: formToken(actor, 'delete', env.TURNFEED_SITE_SECRET, targetFor(data)), action: '/web/delete' }, { headers });
+      }
       data.webActionsUrl = data.viewerOwnsTarget ? '' : controlsPath(data.postId, '', cursor);
       data.thread.webActionsUrl = data.webActionsUrl;
       data.recentReplies = (data.recentReplies || []).map(reply => ({ ...reply, webActionsUrl: controlsPath(data.postId, replySelector(reply), cursor) }));
@@ -501,6 +512,7 @@ export async function handleWeb(request, env, readBody) {
       if (action === 'delete-reply') {
         if (!data.isReply || !data.viewerOwnsTarget) throw new WebError('Only the author can delete this reply.', 403);
         await call(request, env, 'delete_reply', readableTarget(data));
+        if (request.headers.get('accept') === 'application/json') return Response.json({ ok: true, deleted: 'reply', postId: data.postId }, { headers });
         return redirect(`${threadPath(data.postId)}?done=reply-deleted`);
       }
       if (data.viewerOwnsTarget) throw new WebError('Choose someone else’s content for this action.', 403);
@@ -529,11 +541,12 @@ export async function handleWeb(request, env, readBody) {
       const data = await thread(request, env, token.target?.postId);
       if (!data.viewerOwnsTarget) throw new WebError('Only the author can delete this post.', 403);
       if (fingerprint(targetFor(data)) !== fingerprint(token.target)) throw new WebError('The post changed. Review it again before deleting.', 409);
-      // Deleting a thread also removes replies; the dedicated confirmation page
-      // makes that scope explicit. Never accept bulk-deletion fields from a form.
+      // Deleting a thread also removes replies; both confirmation views make
+      // that scope explicit. Never accept bulk-deletion fields from a form.
       await call(request, env, 'delete_post', { id: data.postId, targetLabel: `Post by ${data.thread.authorName}`,
         postText: data.thread.text, ...(data.thread.authorPublicHandle ? { authorHandle: data.thread.authorPublicHandle } : {}),
         ...(data.thread.createdAt ? { createdAt: data.thread.createdAt } : {}), scope: 'one_post' });
+      if (request.headers.get('accept') === 'application/json') return Response.json({ ok: true, deleted: 'post', postId: data.postId }, { headers });
       return redirect('/?done=deleted');
     }
     throw new WebError('This action is unavailable.', 404);

@@ -1,6 +1,7 @@
 import { preparePhoto, photoPreparationScript } from './photo-prepare.mjs';
-import { reactionsScript } from './reactions.mjs';
+import { startReactions, reactionsScript } from './reactions.mjs';
 import { followsScript } from './follows.mjs';
+import { startDeletes } from './deletions.mjs';
 
 /** Progressive enhancement only: publishing still uses the signed browser form. */
 export function startComposers(win, doc, prepare = preparePhoto) {
@@ -19,8 +20,9 @@ export function startComposers(win, doc, prepare = preparePhoto) {
   }));
   if (!entries.length) return;
   let pending = null, guarding = false, pendingTimer;
-  const hasDraft = entry => Boolean(entry.text?.value.length || entry.photo?.files?.length || entry.profileFields.some(field=>field.value!==(field.dataset?.savedValue ?? field.defaultValue)));
+  const hasDraft = entry => entry.form.isConnected !== false && Boolean(entry.text?.value.length || entry.photo?.files?.length || entry.profileFields.some(field=>field.value!==(field.dataset?.savedValue ?? field.defaultValue)));
   function warnBeforeLeaving(event) {
+    if (!entries.some(hasDraft)) return;
     event.preventDefault();
     event.returnValue = '';
   }
@@ -193,4 +195,4 @@ export function startComposers(win, doc, prepare = preparePhoto) {
   restore();
 }
 
-export const composerScript = `${reactionsScript}\n${followsScript}\n${photoPreparationScript}\n(${startComposers.toString()})(window, document, preparePhoto);`;
+export const composerScript = `${reactionsScript}\n${followsScript}\n${photoPreparationScript}\n(${startComposers.toString()})(window, document, preparePhoto);\n(${startDeletes.toString()})(window, document, section => { (${startReactions.toString()})(window, section); (${startComposers.toString()})(window, section, preparePhoto); });`;
